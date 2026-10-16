@@ -30,6 +30,8 @@ Nacos、Consul 只负责入口定位。具名 `qualifier` 不跨环境回退，�
 
 ## 配置与启动
 
+首次使用 MySQL 时先核对[审计触发器初始化权限](#mysql-首次初始化与触发器权限)。普通运行账号的单库权限可能不足以执行首次触发器创建，下面提供 DBA 初始化后切换运行账号的完整命令。
+
 主配置位于 `/app/zcf/application.yml`，导入 `${SAGA_YML:/etc/saga-server/*.yml}`。文件按自然名称顺序合并，后者覆盖前者，列表整体替换。缺少导入文件、凭据或必填配置时拒绝启动。配置变更需要重启，动态流程定义和能力租约独立同步。
 
 准备本地目录，将[授权模板](https://github.com/nasa-runtime/saga-server/blob/release/examples/config/10-security.yml)保存为 `deploy-local/config/10-security.yml`，按实际接入身份配置 caller、租户、参与方地址和凭据映射。Registry caller 必须声明允许的 workflow 范围。
@@ -236,7 +238,47 @@ CREATE DATABASE saga_control OWNER saga_user;
 SQL
 ```
 
-运行账号需要在协调库中建表和读写持久状态，不需要其它业务库的权限。数据库访问网段、防火墙、TLS、高可用与备份由部署方配置。
+正式运行账号需要在协调库中建表、检查结构和读写持久状态，不需要其它业务库的权限。MySQL 首次创建审计触发器还受 binlog 策略约束，见下一节。数据库访问网段、防火墙、TLS、高可用与备份由部署方配置。
+
+### MySQL 首次初始化与触发器权限
+
+协调库包含审计触发器。MySQL 开启 binlog 且 `log_bin_trust_function_creators=0` 时，仅有单库权限的账号可能无法创建触发器，启动会在 schema 检查阶段失败；`GRANT ALL ON saga_control.*` 不包含服务器级权限。由 DBA 核对当前实例策略：
+
+```sh
+mysql --host=mysql.internal --port=3306 --user=db_admin --password \
+  --execute='SELECT @@log_bin, @@log_bin_trust_function_creators;'
+```
+
+在该策略下，由 DBA 使用有权创建触发器的模式管理账号先初始化空的专用协调库，再使用 `saga_user` 启动正式服务。以下只用于首次部署，前提是尚无业务流量、没有其它协调副本运行，基础 `saga.env` 不设置 `APP_PROFILE`，配置目录只包含授权与运行策略。先完成前文的镜像拉取、密钥和配置准备，将下列数据库连接写入只供初始化使用的文件：
+
+```sh
+umask 077
+cat > deploy-local/mysql-bootstrap.env <<'ENV'
+SAGA_DATABASE_DRIVER=mysql
+SAGA_DATABASE_URL=mysql://schema_admin:URL_ENCODED_PASSWORD@mysql.internal:3306/saga_control
+ENV
+chmod 600 deploy-local/mysql-bootstrap.env
+(
+  set -e
+  docker run --detach --name saga-schema-init \
+    --stop-timeout 70 --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --env-file ./deploy-local/saga.env --env-file ./deploy-local/mysql-bootstrap.env \
+    --env SAGA_REPLICA_ID=saga-schema-init \
+    --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+    --publish 127.0.0.1:12079:2070 \
+    "$SAGA_IMAGE"
+  curl --fail --retry 60 --retry-connrefused --retry-delay 1 --retry-max-time 120 \
+    --max-time 2 http://127.0.0.1:12079/readyz
+  docker stop --time 70 saga-schema-init
+  docker rm saga-schema-init
+  rm deploy-local/mysql-bootstrap.env
+)
+```
+
+成功后按所选场景启动正式容器，`saga.env` 仍使用仅具单库权限的 `saga_user`。上面的容器是完整协调进程，通过 Ready 表示初始化完成；它不会自动退出。失败时检查 `docker logs saga-schema-init`，由 DBA 处理数据库原因后再继续，不能绕过 schema 门禁。初始化账号会成为触发器的 `DEFINER`，必须保留该数据库账号及执行触发器所需的表权限；删除临时环境文件不等于删除该账号。
+
+后续升级若需要改变审计触发器，由 DBA 按维护流程处理结构并核对 `DEFINER`，不要把上述首次初始化命令用于已有业务集群。若数据库平台允许应用直接创建触发器，也可由 DBA 管理相应的实例参数或托管数据库参数组；本项目不自动修改服务器全局设置。权限规则见 [MySQL binary logging 与触发器](https://dev.mysql.com/doc/refman/8.4/en/stored-programs-logging.html)。
+
 
 ### PostgreSQL 与固定 HTTP 入口
 

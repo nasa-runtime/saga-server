@@ -4,6 +4,8 @@
 
 [Complete Docker scenario commands](docker/README.md): MySQL/PostgreSQL, direct HTTP, single/dual Nacos, Consul, mixed registries, two replicas, custom ports, metrics, file logs, maintenance and image replacement. Database choice is independent of registry choice; adding a workflow does not require maintenance commands.
 
+MySQL audit triggers require additional creation privileges when binary logging is enabled and `log_bin_trust_function_creators=0`. Database-scoped grants alone may not initialize an empty database. A DBA can initialize the empty coordinator schema with a stable schema-management account, then run the service with the database-scoped account; retain the triggers’ `DEFINER` and its required table privileges. See the [complete initialization commands](docker/README.md#mysql-首次初始化与触发器权限). The application does not change global MySQL settings.
+
 `saga-server` is a standalone NASA Saga orchestrator. Operators run the image and mount deployment configuration; business services publish workflow definitions, implement participant steps and start Sagas. Each business project can use the same coordinator image without assembling a server from NASA source.
 
 The entry point uses `#[nasa::application]`. napp manages the database, Saga runtime, Outbox, HTTP listener, logging, named discovery connections and the nafana metrics exporter. The application uses `nasa 2.0.5` from crates.io; it does not duplicate the coordination engine or storage implementation.
