@@ -2,6 +2,8 @@
 
 [中文](README.md)
 
+[Complete Docker scenario commands](docker/README.md): MySQL/PostgreSQL, direct HTTP, single/dual Nacos, Consul, mixed registries, two replicas, custom ports, metrics, file logs, maintenance and image replacement. Database choice is independent of registry choice; adding a workflow does not require maintenance commands.
+
 `saga-server` is a standalone NASA Saga orchestrator. Operators run the image and mount deployment configuration; business services publish workflow definitions, implement participant steps and start Sagas. Each business project can use the same coordinator image without assembling a server from NASA source.
 
 The entry point uses `#[nasa::application]`. napp manages the database, Saga runtime, Outbox, HTTP listener, logging, named discovery connections and the nafana metrics exporter. The application uses `nasa 2.0.5` from crates.io; it does not duplicate the coordination engine or storage implementation.
@@ -353,6 +355,8 @@ Sagas. Shutdown revokes eligibility and registrations before draining work and c
 HTTP signatures cover the actual path and raw body. Forward `x-saga-*` headers unchanged, preserve Saga paths and JSON bytes, and disable blind POST retries. On an ambiguous outcome, the caller preserves the original business identity and content but generates a new timestamp, nonce and signature. Replaying the original HTTP request through a proxy triggers replay rejection. Synchronize node clocks within the 30 second signature window, and use HTTPS certificates trusted by the caller.
 
 After a replica fails, already claimed work may wait for lease expiry before takeover. The default timer lease is 60 seconds; `timer_poll_interval_ms: 500` does not guarantee a 500 ms recovery time. Scrape each replica separately and deduplicate shared database metrics as described in the [monitoring guide](docs/monitoring.md).
+
+MySQL Outbox protects dispatch order with a database session lock. A paused process or half-open network can leave that session alive; another replica cannot steal its lock. Delivery resumes when the original process recovers or its database session closes after the process exits. A timer lease does not release this lock. PostgreSQL Outbox instead uses a durable owner lease with fencing. Recovery therefore depends on the storage backend and failure mode. Docker health checks alone do not terminate an unresponsive process; deployment operators must provide a corresponding failure-handling policy.
 
 ### Registry isolation and failure boundaries
 

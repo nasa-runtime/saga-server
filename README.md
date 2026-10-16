@@ -42,6 +42,8 @@ flowchart LR
 
 前提是新流程沿用已授权的身份、租户、签名公钥和参与方网络范围。模板以 `workflows: ["*"]` 授予可信拥有方流程名称范围，定义归属检查仍生效；精确名称列表只允许列出的流程。未激活定义不能发起实例，`/readyz` 成功也不代表某个新流程已经可用。按[动态目录观测](docs/monitoring.md#动态目录与新流程接入)核对定义状态和能力续租，无需通过重启触发同步。
 
+以下终端命令使用 Bash，所有地址和凭据占位值均需按实际环境填写。
+
 ## 配置与凭据
 
 以下命令在源码仓库根目录执行；只使用容器的部署方也可按 [Docker Hub 使用说明](docker/README.md)下载所需配置，不必安装 Rust。
@@ -187,7 +189,7 @@ unset SAGA_HTTP_KEY
 
 ## 使用 Nacos
 
-在同一份环境文件中增加：
+为单 Nacos 准备独立的 `deploy-local/nacos.env`：
 
 ```dotenv
 APP_PROFILE=nacos
@@ -198,6 +200,23 @@ NACOS_USERNAME=YOUR_NACOS_USERNAME
 NACOS_PASSWORD=YOUR_NACOS_PASSWORD
 SAGA_REGISTER_IP=192.168.10.20
 SAGA_REGISTER_PORT=12070
+```
+
+将本段变量保存为 `deploy-local/nacos.env`，基础数据库和密钥继续使用 `deploy-local/saga.env`。基础文件不设置 `APP_PROFILE`，授权目录不混入其它发现配置。以下为该场景的完整启动及检查命令；各模式在首次部署时择一，不同时占用示例端口。
+
+```sh
+docker run --detach --name saga-nacos \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --env-file ./deploy-local/saga.env \
+  --env-file ./deploy-local/nacos.env \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 192.168.10.20:12070:2070 \
+  "$SAGA_IMAGE"
+docker logs --tail 100 saga-nacos
+curl --fail http://192.168.10.20:12070/readyz
+curl --fail http://192.168.10.20:12070/discovery/eligible/primary-recovery
 ```
 
 将端口映射改为 `--publish 192.168.10.20:12070:2070`。发布地址必须是调用方可达的 IP 和端口，
@@ -227,7 +246,27 @@ SECONDARY_REGISTER_IP=192.168.20.20
 SECONDARY_REGISTER_PORT=22070
 ```
 
-两个网络入口分别发布 `192.168.10.20:12070:2070` 和 `192.168.20.20:22070:2070`，转发至同一个容器的 2070 端口；IP 必须属于宿主机或由受信网关提供。两个环境各自发现自己的可达地址，共享同一套 Saga 数据。Consul 单后端在同一环境文件选择以下配置，替换原 `APP_PROFILE`：
+将本段变量保存为 `deploy-local/secondary.env`，基础数据库和密钥继续使用 `deploy-local/saga.env`。基础文件不设置 `APP_PROFILE`，授权目录不混入其它发现配置。以下为该场景的完整启动及检查命令；各模式在首次部署时择一，不同时占用示例端口。
+
+```sh
+docker run --detach --name saga-multi-nacos \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --env-file ./deploy-local/saga.env \
+  --env-file ./deploy-local/nacos.env \
+  --env-file ./deploy-local/secondary.env \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 192.168.10.20:12070:2070 \
+  --publish 192.168.20.20:22070:2070 \
+  "$SAGA_IMAGE"
+docker logs --tail 100 saga-multi-nacos
+curl --fail http://192.168.10.20:12070/readyz
+curl --fail http://192.168.10.20:12070/discovery/eligible/primary-recovery
+curl --fail http://192.168.20.20:22070/discovery/eligible/secondary-recovery
+```
+
+两个网络入口分别发布 `192.168.10.20:12070:2070` 和 `192.168.20.20:22070:2070`，转发至同一个容器的 2070 端口；IP 必须属于宿主机或由受信网关提供。两个环境各自发现自己的可达地址，共享同一套 Saga 数据。Consul 单后端使用独立的 `deploy-local/consul.env`，选择以下 profile 和发布端点：
 
 ```dotenv
 APP_PROFILE=consul
@@ -237,6 +276,23 @@ CONSUL_DATACENTER=dc1
 CONSUL_TOKEN=YOUR_CONSUL_TOKEN
 SAGA_REGISTER_IP=192.168.10.20
 SAGA_REGISTER_PORT=12070
+```
+
+将本段变量保存为 `deploy-local/consul.env`，基础数据库和密钥继续使用 `deploy-local/saga.env`。基础文件不设置 `APP_PROFILE`，授权目录不混入其它发现配置。以下为该场景的完整启动及检查命令；各模式在首次部署时择一，不同时占用示例端口。
+
+```sh
+docker run --detach --name saga-consul \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --env-file ./deploy-local/saga.env \
+  --env-file ./deploy-local/consul.env \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 192.168.10.20:12070:2070 \
+  "$SAGA_IMAGE"
+docker logs --tail 100 saga-consul
+curl --fail http://192.168.10.20:12070/readyz
+curl --fail http://192.168.10.20:12070/discovery/eligible/primary-recovery
 ```
 
 ```mermaid
@@ -371,6 +427,8 @@ HTTP 签名覆盖实际 path 与原始 body。代理需透传 `x-saga-*` 请求�
 
 副本故障后的已领取任务可能等待租约到期后接管。默认 timer 租约为 60 秒，`timer_poll_interval_ms: 500` 不是故障恢复时间承诺。Prometheus 分别抓取各副本，共享数据库的数量指标按[监控指南](docs/monitoring.md)去重。
 
+MySQL Outbox 使用数据库会话锁保护投递顺序。进程被暂停、宿主机卡住或网络半开时，持锁连接可能仍然存在，其他副本不会强抢该锁；timer 继续运行也不能替代命令投递。恢复原进程或确认原进程退出并关闭其数据库会话后才能继续投递，不保证仅等待业务租约就能接管。PostgreSQL Outbox 使用带 fencing 的持久 owner 租约，失权发布者不能确认结果。两种数据库的恢复机制不能混用；部署方需检测无响应进程并按停机策略处置，不能把 Docker 健康检查误认为自动终止机制。
+
 ### 多注册中心的能力边界
 
 连接和发布目标在启动时冻结，修改配置需要重启。默认 qualifier 为小写 `primary`，显式未知
@@ -380,6 +438,186 @@ HTTP 签名覆盖实际 path 与原始 body。代理需透传 `x-saga-*` 请求�
 注册中心可达不等于参与方可达。跨网络仍需受信路由或网关，协调器与参与方要双向可达。完全隔离
 的业务环境应分别部署协调数据库和入口。Kubernetes 不支持应用自行写入注册记录，详见
 [后端与恢复通道边界](docs/discovery.md)。
+
+## 其它部署与运维命令
+
+### 创建协调数据库
+
+由数据库管理员在已有 MySQL 或 PostgreSQL 上执行，二选一。以下只适用于首次创建专用协调库，已有数据库保留原数据和账号，不重复建库。替换密码占位值，并在连接 URL 中对特殊字符进行 URL 编码。
+
+```sh
+mysql --host=mysql.internal --port=3306 --user=db_admin --password <<'SQL'
+CREATE DATABASE saga_control CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'saga_user'@'%' IDENTIFIED BY 'REPLACE_WITH_DATABASE_PASSWORD';
+GRANT ALL PRIVILEGES ON saga_control.* TO 'saga_user'@'%';
+SQL
+```
+
+```sh
+psql 'host=postgres.internal port=5432 dbname=postgres user=db_admin' --password <<'SQL'
+CREATE ROLE saga_user LOGIN PASSWORD 'REPLACE_WITH_DATABASE_PASSWORD';
+CREATE DATABASE saga_control OWNER saga_user;
+SQL
+```
+
+运行账号需要在协调库中建表和读写持久状态，不需要其它业务库的权限。数据库访问网段、防火墙、TLS、高可用与备份由部署方配置。
+
+### PostgreSQL 与固定 HTTP 入口
+
+将下面两项单独保存为 `deploy-local/postgres.env`，基础环境文件继续保留密钥和稳定身份，不设置 discovery profile。配置目录只包含授权和运行策略，不加入 Nacos/Consul 发现目标。
+
+```dotenv
+SAGA_DATABASE_DRIVER=postgresql
+SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:5432/saga_control
+```
+
+```sh
+docker run --detach --name saga-postgres \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env-file ./deploy-local/postgres.env \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 127.0.0.1:2070:2070 \
+  "$SAGA_IMAGE"
+curl --fail http://127.0.0.1:2070/healthz
+curl --fail http://127.0.0.1:2070/readyz
+docker logs --tail 100 saga-postgres
+```
+
+数据库与注册中心相互独立。PostgreSQL 也可配合单 Nacos、双 Nacos 或 Consul：在对应启动命令的其它环境文件之后追加 `--env-file ./deploy-local/postgres.env`。同一协调集群所有副本必须使用同一个协调数据库。
+
+### Nacos 与 Consul 混合发布
+
+先填写前文的 `nacos.env` 和 `consul.env`。使用独立挂载目录，去掉两份文件的 profile 后合并变量，避免叠加内置目标。基础 `saga.env` 不设置 `APP_PROFILE`。本例使用前文中的两条内网 IP 映射。
+
+```sh
+mkdir -p deploy-local/mixed-config
+cp deploy-local/config/10-security.yml deploy-local/mixed-config/10-security.yml
+curl --fail --location \
+  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/config/discovery-mixed.yml \
+  --output deploy-local/mixed-config/30-discovery.yml
+umask 077
+grep -v '^APP_PROFILE=' deploy-local/nacos.env > deploy-local/mixed.env
+grep -v '^APP_PROFILE=' deploy-local/consul.env >> deploy-local/mixed.env
+chmod 600 deploy-local/mixed.env
+docker run --detach --name saga-mixed \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env-file ./deploy-local/mixed.env \
+  --env SECONDARY_REGISTER_IP=192.168.20.20 --env SECONDARY_REGISTER_PORT=22070 \
+  --mount "type=bind,src=$PWD/deploy-local/mixed-config,dst=/etc/saga-server,readonly" \
+  --publish 192.168.10.20:12070:2070 --publish 192.168.20.20:22070:2070 \
+  "$SAGA_IMAGE"
+curl --fail http://192.168.10.20:12070/readyz
+curl --fail http://192.168.10.20:12070/discovery/eligible/primary-recovery
+curl --fail http://192.168.20.20:22070/discovery/eligible/secondary-recovery
+docker logs --tail 100 saga-mixed
+```
+
+映射 IP 必须属于当前宿主机，或通过受信网关提供等效路径。上述探针只说明本地资格，还应从两个业务网络检查发现记录与 HTTP 连通性。两套 Nacos 使用同一服务地址、不同 namespace/group 时，沿用双 Nacos 命令并分别填写对应范围与凭据；两个目标不能覆盖同一注册记录。
+
+### 两个协调副本共享数据库
+
+以下使用固定 HTTP 模式。两副本共享数据库、信任配置和分页密钥，分别使用稳定的副本身份；基础环境文件不启用发现配置。与前面的单实例命令择一，不重复运行相同身份。
+
+```sh
+docker run --detach --name saga-server-0 \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env SAGA_REPLICA_ID=saga-server-0 \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 127.0.0.1:12070:2070 \
+  "$SAGA_IMAGE"
+docker run --detach --name saga-server-1 \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env SAGA_REPLICA_ID=saga-server-1 \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 127.0.0.1:12071:2070 \
+  "$SAGA_IMAGE"
+curl --fail http://127.0.0.1:12070/readyz
+curl --fail http://127.0.0.1:12071/readyz
+docker stats --no-stream saga-server-0 saga-server-1
+```
+
+跨宿主机部署时分别执行一条命令，并使用各自的受控内网 IP。负载均衡器必须区分业务与恢复通道，不能因普通业务未就绪而阻断全部能力登记。固定副本身份和宿主机端口的基础 Compose 不直接使用 `--scale`；按副本准备独立身份与端口。启用 Nacos/Consul 时，还需分别配置可达发布端点与固定 agent，避免注册记录冲突。
+
+### 自定义端口、指标与文件日志
+
+只改变宿主机映射端口时保留内部 `2070` 即可。确需改变内部监听端口时，同时覆盖 Docker 健康检查，并同步注册端口和 Prometheus 抓取目标：
+
+```sh
+docker run --detach --name saga-custom-port \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env APP__SERVER__PORT=2080 \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --publish 127.0.0.1:12080:2080 --publish 127.0.0.1:9464:9464 \
+  --health-cmd='wget -q -O /dev/null http://127.0.0.1:2080/readyz || exit 1' \
+  "$SAGA_IMAGE"
+curl --fail http://127.0.0.1:12080/readyz
+curl --fail http://127.0.0.1:12080/_nasa/saga/metrics
+curl --fail http://127.0.0.1:9464/metrics
+```
+
+需要文件日志时，先创建 UID/GID 10001 可写目录，再运行下面的完整命令；与控制台日志模式择一，配置目录仍为只读。
+
+```sh
+sudo install -d -o 10001 -g 10001 -m 0750 deploy-local/logs
+docker run --detach --name saga-file-log \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file ./deploy-local/saga.env --env SAGA_LOG_PATH=/var/log/saga-server \
+  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --mount "type=bind,src=$PWD/deploy-local/logs,dst=/var/log/saga-server" \
+  --publish 127.0.0.1:2070:2070 \
+  "$SAGA_IMAGE"
+curl --fail http://127.0.0.1:2070/readyz
+docker logs --tail 100 saga-file-log
+```
+
+以上目录授权命令用于 Linux 宿主机；Docker Desktop 的挂载授权还需符合其文件共享设置。环境文件与私钥仅允许部署账号读取，配置 YAML 则必须允许容器 UID 10001 读取。不要输出包含环境变量的完整 `docker inspect` 结果来排查凭据。
+
+### 状态检查与计划维护
+
+将示例容器名 `saga-server` 换为实际运行的名称：
+
+```sh
+docker ps --filter name=saga-server
+docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' saga-server
+docker logs --since 10m --tail 200 saga-server
+docker stats --no-stream saga-server
+```
+
+只在计划维护时摘流并停止服务；原容器重新启动时保留数据库、配置、密钥和副本身份：
+
+```sh
+docker stop --time 70 saga-server
+docker start saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+替换镜像前完成数据库备份和数据结构兼容性确认。先拉取目标镜像，再从普通业务入口摘除待更新副本、排空请求并停止该副本。目标 digest 由部署方选择：
+
+```sh
+export SAGA_IMAGE='nasaruntime/saga-server@sha256:REPLACE_WITH_TARGET_MANIFEST_DIGEST'
+docker pull "$SAGA_IMAGE"
+docker stop --time 70 saga-server
+docker rm saga-server
+```
+
+随后重新执行已选场景的完整 `docker run` 命令，保留原环境文件、挂载和副本身份，确认业务与恢复入口后恢复流量。回退使用同样步骤及已确认兼容的旧 digest，不能假设旧程序一定支持升级后的数据结构。多副本逐个替换，单副本有维护窗口；新增业务流程不执行这些停止命令。
+
+Compose 部署在同样的维护与摘流条件下更新指定服务：
+
+```sh
+docker compose -p saga -f docker/compose.yml pull saga-server
+docker compose -p saga -f docker/compose.yml up -d --no-deps saga-server
+docker compose -p saga -f docker/compose.yml ps
+docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
+```
+
+监控 Compose 使用项目名 `saga-monitoring` 和文件 `docker/monitoring/compose.yml` 执行相同的服务级操作。仅更新 `saga-server`，保留 Prometheus 与 Grafana 数据卷；不要用删除数据卷代替升级。
 
 ## Grafana 与 Prometheus
 

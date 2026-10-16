@@ -8,7 +8,7 @@ with urllib.request.urlopen(request, timeout=30) as response:
     token = json.load(response)['access_token']
 print(f'::add-mask::{token}')
 overview = Path('docker/README.md').read_text()
-description = 'Saga orchestrator: workflows without server restarts; multi-registry discovery and durable recovery.'
+description = '独立 Saga 协调服务：新增流程无需重启，支持多注册中心接入、数据库持久恢复、幂等与补偿。'
 url = f'https://hub.docker.com/v2/repositories/{os.environ["IMAGE"]}/'
 request = urllib.request.Request(url, data=json.dumps({'description': description, 'full_description': overview}).encode(), headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}, method='PATCH')
 with urllib.request.urlopen(request, timeout=30):
