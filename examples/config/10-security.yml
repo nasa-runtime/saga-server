@@ -1,0 +1,55 @@
+secrets:
+  saga-command:
+    encoding: raw
+    max_bytes: 64
+    fragments: [{env: SAGA_COMMAND_KEY}]
+  saga-result:
+    encoding: raw
+    max_bytes: 64
+    fragments: [{env: SAGA_RESULT_KEY}]
+  saga-page-token:
+    encoding: raw
+    max_bytes: 64
+    fragments: [{env: SAGA_PAGE_TOKEN_KEY}]
+  saga-client:
+    encoding: raw
+    max_bytes: 64
+    fragments: [{env: SAGA_CLIENT_KEY}]
+  saga-worker:
+    encoding: raw
+    max_bytes: 64
+    fragments: [{env: SAGA_WORKER_KEY}]
+  saga-definition-public:
+    encoding: raw
+    max_bytes: 256
+    fragments: [{env: SAGA_DEFINITION_PUBLIC_KEY}]
+
+saga:
+  definition_catalog:
+    publish_tenants: [system]
+    signing_keys:
+      order-owner-key: saga-definition-public
+  api:
+    http:
+      callers:
+        order-api:
+          credential_ref: saga-client
+          tenants: [system]
+          permissions: [start, read]
+        order-worker:
+          credential_ref: saga-worker
+          tenants: [system]
+          # 可信流程拥有方可在已授权租户内动态发布新流程，无需逐个预置流程名称。
+          # 此范围不按流程名称隔离；定义归属、租户与签名门禁仍生效，仅授予可信流程拥有方。
+          workflows: ["*"]
+          permissions: [registry]
+  transport:
+    address_policies:
+      saga-participants:
+        http_schemes: [http]
+        http_hosts: [order-worker]
+        http_ports: [2080]
+    command_result:
+      http:
+        producer_credentials:
+          order-worker: saga-worker

@@ -1,0 +1,32 @@
+discovery:
+  enabled: true
+  # 注册目标的资格与整个进程的就绪状态分别观测；探针仅向受信网络开放。
+  eligibility_probe: true
+  connections:
+    primary:
+      provider: nacos
+      nacos:
+        server_addr: ${NACOS_SERVER_ADDR}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:SAGA_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+        services:
+          coordinator: {name: "${SAGA_SERVICE_ID:saga-server}"}
+          recovery: {name: "${SAGA_SERVICE_ID:saga-server}-recovery"}
+  registrations:
+    primary-http:
+      qualifier: primary
+      service_name: coordinator
+      listener_ref: web
+      eligibility_ref: web
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}
+    primary-recovery:
+      qualifier: primary
+      service_name: recovery
+      listener_ref: web
+      # 能力续租与结果回传保留恢复入口，避免目录失去能力后无法重新取得就绪证据。
+      eligibility_ref: saga-recovery
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}

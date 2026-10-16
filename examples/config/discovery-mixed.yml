@@ -1,0 +1,62 @@
+# 与身份、凭据及地址白名单配置一起导入；不同时启用内置 discovery profile。
+discovery:
+  enabled: true
+  eligibility_probe: true
+  connections:
+    primary:
+      provider: nacos
+      nacos:
+        server_addr: ${NACOS_SERVER_ADDR}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: ${NACOS_GROUP:SAGA_GROUP}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+        services:
+          coordinator: {name: "${SAGA_SERVICE_ID:saga-server}"}
+          recovery: {name: "${SAGA_SERVICE_ID:saga-server}-recovery"}
+    consul-go:
+      provider: consul
+      consul:
+        api_addr: ${CONSUL_API_ADDR}
+        # 固定 agent 持有本进程的注册记录，不能使用随机负载均衡地址。
+        agent_addr: ${CONSUL_AGENT_ADDR}
+        datacenter: ${CONSUL_DATACENTER}
+        token: ${CONSUL_TOKEN:}
+        services:
+          coordinator: ${SAGA_SERVICE_ID:saga-server}
+          recovery: ${SAGA_SERVICE_ID:saga-server}-recovery
+  registrations:
+    primary-http:
+      qualifier: primary
+      service_name: coordinator
+      listener_ref: web
+      eligibility_ref: web
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}
+    primary-recovery:
+      qualifier: primary
+      service_name: recovery
+      listener_ref: web
+      # 能力失效时仍保留续租和结果回传路径；认证与事务门禁继续生效。
+      eligibility_ref: saga-recovery
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}
+    secondary-http:
+      qualifier: consul-go
+      service_name: coordinator
+      listener_ref: web
+      eligibility_ref: web
+      ip: ${SECONDARY_REGISTER_IP}
+      port: ${SECONDARY_REGISTER_PORT:2070}
+      consul:
+        check: {mode: ttl, ttl_ms: 15000, report_interval_ms: 5000}
+    secondary-recovery:
+      qualifier: consul-go
+      service_name: recovery
+      listener_ref: web
+      # 恢复资格独立于业务能力目录，停机时随 Saga 生命周期撤销。
+      eligibility_ref: saga-recovery
+      ip: ${SECONDARY_REGISTER_IP}
+      port: ${SECONDARY_REGISTER_PORT:2070}
+      consul:
+        check: {mode: ttl, ttl_ms: 15000, report_interval_ms: 5000}

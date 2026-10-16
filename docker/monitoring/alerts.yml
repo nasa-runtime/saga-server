@@ -1,0 +1,27 @@
+groups:
+  - name: saga-server
+    rules:
+      - alert: SagaScrapeUnavailable
+        expr: up{job=~"saga-application|saga-state"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Saga 指标抓取失败"
+          description: "检查目标进程、数据库、网络与抓取配置；up 不能替代 /readyz。"
+      - alert: SagaManualIntervention
+        expr: max by (deployment_environment, cluster, service_name) (nasaga_manual_intervention{job="saga-state"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Saga 存在需要人工介入的实例"
+          description: "通过受鉴权查询与审计接口检查原因，再由有权限的操作方处置。"
+      - alert: SagaTimerBacklog
+        expr: max by (deployment_environment, cluster, service_name) (nasaga_due_timer{job="saga-state"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Saga 到期 timer 持续积压"
+          description: "检查数据库、参与方能力租约和投递状态；阈值应按业务容量调整。"

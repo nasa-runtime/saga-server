@@ -1,0 +1,508 @@
+{
+  "uid": "saga-server",
+  "title": "Saga Server",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "saga",
+    "nasa"
+  ],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "environment",
+        "label": "环境",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "saga-prometheus"
+        },
+        "query": "label_values(napp_instance_info, deployment_environment)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "cluster",
+        "label": "集群",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "saga-prometheus"
+        },
+        "query": "label_values(napp_instance_info{deployment_environment=~\"$environment\"}, cluster)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "service",
+        "label": "服务",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "saga-prometheus"
+        },
+        "query": "label_values(napp_instance_info{deployment_environment=~\"$environment\",cluster=~\"$cluster\"}, service_name)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Prometheus 抓取状态",
+      "type": "timeseries",
+      "description": "up=1 只表示抓取成功，业务就绪以 /readyz 为准。",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=~\"saga-application|saga-state\"}",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "运行中的 Saga",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_running{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "补偿中的 Saga",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_compensating{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "需要人工介入",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_manual_intervention{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "完成累计数",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_completed_total{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "补偿完成累计数",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_compensated_total{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "到期 timer",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_due_timer{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "等待结果裁决",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (nasaga_waiting_resolution{job=\"saga-state\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Outbox 最旧等待时间",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name, event_type) (napp_outbox_oldest_pending_age_seconds{job=\"saga-application\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Outbox 死信",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name) (napp_outbox_dead{job=\"saga-application\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "流程端到端 P50/P95/P99",
+      "type": "timeseries",
+      "description": "数据库中保留的已完成生命周期分布；不是最近五分钟窗口，不对各副本分位数求和或平均。",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment, cluster, service_name, workflow, definition_version, quantile) (nasaga_lifecycle_duration_seconds{job=\"saga-state\",quantile=~\"0.5|0.95|0.99\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "指标快照拒绝速率",
+      "type": "timeseries",
+      "description": "非零表示指标覆盖不完整，应检查来源容量和指标合同。",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saga-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason, source) (rate(nametrics_samples_rejected_total{job=\"saga-application\",deployment_environment=~\"$environment\",cluster=~\"$cluster\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{service_name}} {{instance}} {{quantile}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ]
+}

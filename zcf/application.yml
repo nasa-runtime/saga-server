@@ -1,0 +1,169 @@
+# 本地 YAML、环境变量和凭据在启动时加载，修改后需要重启进程。
+# 动态流程定义与参与方能力由 Catalog 同步，不受本地配置重启要求限制。
+application:
+  # 应用名称，同时用于下方默认日志目录的嵌套引用。
+  name: saga-server
+  # 持续运行的服务模式，由 napp 接管启动、就绪状态与停机。
+  mode: service
+  # 整个应用的启动预算，单位毫秒；初始化不能在预算内完成时停止启动。
+  startup_timeout_ms: 60000
+  # 整个应用的停机预算，单位毫秒；容器停止宽限期应大于此值。
+  shutdown_timeout_ms: 60000
+
+log:
+  # 日志级别；环境变量未设置时使用 info。
+  level: ${SAGA_LOG_LEVEL:info}
+  # 文件日志目录；支持嵌套引用，默认随 application.name 变化。
+  # SAGA_LOG_PATH 显式设为空时只输出控制台；非空目录必须允许运行用户写入。
+  path: ${SAGA_LOG_PATH:/usr/local/logs/${application.name}}
+  # 禁用 ANSI 颜色，便于容器日志采集与文件阅读。
+  color: false
+
+server:
+  # 监听容器内所有 IPv4 网卡；此地址不是向 Nacos 注册的可达 IP。
+  host: 0.0.0.0
+  # 容器内 HTTP 端口；变更后需同步容器探针、端口映射与监控抓取目标。
+  port: 2070
+  # 开放 /healthz 存活探针与 /readyz 就绪探针，保留真实 HTTP 探针状态。
+  health: true
+  # Web 层默认请求体上限，单位字节；Saga HTTP 提取器使用下方专用的请求体限制。
+  request_body_limit_bytes: 1048576
+  # 停机时等待 HTTP 在途请求结束的上限，单位毫秒，受应用总停机预算约束。
+  graceful_shutdown_timeout_ms: 10000
+
+discovery:
+  # 固定地址接入无需注册中心；nacos、multi-nacos 或 consul profile 提供具名注册配置。
+  enabled: false
+
+grafana:
+  # 由 napp 托管 nafana 指标出口；Grafana 与 Prometheus 作为独立服务部署。
+  observability:
+    # 开启可观测数据输出，供监控平台采集。
+    enabled: true
+    # 指标身份标签用于区分逻辑服务、部署环境与副本。
+    identity:
+      # 同一协调服务的所有副本使用相同的逻辑服务标签。
+      service_name: ${saga.service_identity}
+      # 部署环境，例如 production；默认 local，生产部署应显式设置。
+      environment: ${SAGA_ENVIRONMENT:local}
+      # 部署集群标签，用于隔离不同集群的监控数据。
+      cluster: ${SAGA_CLUSTER:local}
+      # 指标副本身份，默认引用协调副本身份；同一服务各副本必须可区分。
+      instance_id: ${SAGA_METRICS_INSTANCE_ID:${saga.replica_identity}}
+      # 服务软件版本标签，便于观测不同软件版本的运行情况。
+      service_version: 1.0.0
+    prometheus:
+      scrape:
+        # 使用独立监听器，指标抓取不占用业务 HTTP 端口。
+        listener: dedicated
+        # nafana 指标监听地址，仅允许受信监控网络访问，避免暴露到公网。
+        bind: 0.0.0.0:9464
+        # Prometheus 抓取路径；Saga 持久状态指标另由业务端口的 /_nasa/saga/metrics 提供。
+        path: /metrics
+
+yml:
+  # 导入部署配置；同一通配模式按文件名自然顺序合并，后面的文件覆盖前面的文件。
+  # 对象递归合并，列表整体替换；容器可将整个配置目录只读挂载至 /etc/saga-server。
+  imports:
+    # 可用 SAGA_YML 指定文件或通配模式；默认读取挂载目录中的所有 .yml 文件。
+    - file: ${SAGA_YML:/etc/saga-server/*.yml}
+      # 必须至少匹配一个文件，读取或解析失败时拒绝启动，防止缺少授权配置仍接流。
+      optional: false
+
+datasources:
+  # 协调状态、Inbox、Outbox 与 Catalog 共用的逻辑数据源。
+  saga-control:
+    # 可选 mysql 或 postgresql；选择应与连接 URL 对应。
+    driver: ${SAGA_DATABASE_DRIVER:mysql}
+    # 必填的数据库连接 URL；数据库需预先创建，密码中的特殊字符需 URL 编码。
+    # MySQL 示例：SAGA_DATABASE_URL=mysql://saga_user:YOUR_PASSWORD@mysql.internal:3306/saga_control
+    # PostgreSQL 示例：SAGA_DATABASE_URL=postgres://saga_user:YOUR_PASSWORD@postgres.internal:5432/saga_control
+    # saga_user 为账号，YOUR_PASSWORD 为密码占位符，@ 后依次为主机、端口与实际数据库名。
+    url: ${SAGA_DATABASE_URL}
+    # 单个副本的连接池上限；数据库容量规划需计入全部副本的连接数。
+    max_connections: 16
+    # 连接池维持的最小连接数，不得大于 max_connections。
+    min_connections: 1
+    # 从连接池取得可用连接的最长等待时间，单位毫秒。
+    acquire_timeout_ms: 3000
+    # 启动连通性探测的连接建立超时，单位毫秒；业务取连接受 acquire_timeout_ms 约束。
+    connect_timeout_ms: 5000
+
+outbox:
+  # 与协调器使用同一数据源，使协调状态和待投递命令处于同一事务域。
+  datasource_ref: saga-control
+
+saga:
+  # 独立服务只承担协调角色；业务步骤与补偿由远端参与方实现。
+  role: orchestrator
+  # 由 napp 根据配置装配数据库、协调器、协议与后台任务。
+  plan_mode: managed
+  # 应用启动时接管数据库引导与表结构准备，数据库账号需具备相应 DDL 权限。
+  database_bootstrap: application
+  # 逻辑协调服务身份；多副本保持一致，并与参与方信任的协调服务身份一致。
+  service_identity: ${SAGA_SERVICE_ID:saga-server}
+  # 必填的副本身份，用于协调任务归属；同一服务内唯一，重启后保持稳定。
+  replica_identity: ${SAGA_REPLICA_ID}
+  orchestrator:
+    # 必须与 Outbox 和动态 Catalog 指向相同的协调数据库。
+    datasource_ref: saga-control
+    # 正常完成一轮到期任务处理后的等待时间，单位毫秒，不代表业务完成延迟上限。
+    timer_poll_interval_ms: 500
+    # 到期任务处理失败或超时后的退避时间，单位毫秒，不是业务步骤的重试间隔。
+    timer_error_backoff_ms: 1000
+    # 单轮到期任务处理的超时预算，单位毫秒；失败状态会纳入就绪判定。
+    timer_operation_timeout_ms: 5000
+    # 是否允许人工关闭 Saga；启用时还需开放管理 API 并配置相应操作权限。
+    enable_manual_close: false
+  definition_catalog:
+    # 从持久目录接收并同步流程定义，无需将业务流程编译进此服务。
+    mode: dynamic
+    # 定义与能力目录的数据源，保持与协调状态一致。
+    datasource_ref: saga-control
+    # validated 在定义和能力合同校验通过后自动激活；approved 需要显式授权激活。
+    activation_policy: validated
+    # 动态目录监督循环的轮询间隔，单位毫秒，不是本地 YAML 的热加载间隔。
+    watch_interval_ms: 500
+    # 声明动态目录使用的能力注册表引用名，不是网络地址或凭据。
+    capability_registry_ref: saga-participant-capabilities
+    # 声明定义发布授权策略引用名；实际发布范围与签名信任须在导入配置中提供。
+    publisher_authorization_policy_ref: saga-definition-publishers
+  http:
+    # Saga HTTP 路由前缀；请求签名包含路径，调用方与代理必须使用一致的实际路径。
+    base_path: /_nasa/saga
+  api:
+    # secrets 中的分页令牌签名密钥引用，至少 32 字节；所有协调副本须保持一致。
+    page_token_key_ref: saga-page-token
+    http:
+      # 开放 Saga 发起、查询、审计与指标等 HTTP API。
+      enabled: true
+      # 默认关闭暂停、恢复及人工处置等实例管理入口，启用后仍须逐项授权。
+      expose_admin: false
+      # 开放能力登记与定义生命周期入口；业务操作受 registry 权限及租户、流程范围约束。
+      expose_definition_registry: true
+      # API 授权策略引用名；具体调用身份、凭据及权限由导入配置中的 callers 声明。
+      authorization_policy_ref: saga-http-rbac
+  transport:
+    # 协调器发送步骤命令，参与方回传处理结果；两条链路均需可信身份与防重放控制。
+    command_result:
+      # 此服务装配 HTTP 数据面，参与方必须使用相同协议。
+      kind: http
+      http:
+        # 声明共享防重放存储引用；受管模式使用数据库记录，多副本共享重放判定。
+        shared_replay_claim: saga-http-replay
+        # secrets 中的出站命令 HMAC 密钥引用；参与方需配置信任此协调身份的对应密钥。
+        command_credential_ref: saga-command
+        # HTTP 合同要求声明的结果凭据引用；此协调角色按 producer_credentials 逐身份验证入站结果。
+        result_credential_ref: saga-result
+        # 出站请求与入站处理的超时预算，单位毫秒；入站预算包含排队、读请求体和事务处理。
+        # 请求超时不能作为事务未提交的证据，调用方需按协议查询或进行幂等重试。
+        request_timeout_ms: 5000
+        # Saga HTTP 提取器的请求体上限，单位字节；需与 Web 层预算一起规划。
+        body_limit_bytes: 1048576
+        # 限制同时处理的 Saga HTTP 请求数，保护数据库；等待时间计入请求超时预算。
+        concurrency_limit: 256
+        routing:
+          # 按已登记且租约有效的参与方能力选择命令目标。
+          mode: capability-registry
+          # 引用 saga.transport.address_policies 下的地址白名单，限定允许访问的协议、主机与端口。
+          address_policy_ref: saga-participants

@@ -1,0 +1,41 @@
+discovery:
+  enabled: true
+  eligibility_probe: true
+  connections:
+    primary:
+      provider: consul
+      consul:
+        api_addr: ${CONSUL_API_ADDR}
+        # 注册只写这一固定 agent，不能用随机负载均衡地址替代。
+        agent_addr: ${CONSUL_AGENT_ADDR}
+        datacenter: ${CONSUL_DATACENTER}
+        token: ${CONSUL_TOKEN:}
+        services:
+          coordinator: ${SAGA_SERVICE_ID:saga-server}
+          recovery: ${SAGA_SERVICE_ID:saga-server}-recovery
+  registrations:
+    primary-http:
+      qualifier: primary
+      service_name: coordinator
+      listener_ref: web
+      eligibility_ref: web
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}
+      consul:
+        check:
+          mode: ttl
+          ttl_ms: 15000
+          report_interval_ms: 5000
+    primary-recovery:
+      qualifier: primary
+      service_name: recovery
+      listener_ref: web
+      # 业务目录暂时失去能力时，仍允许受信参与方续租并回传已提交结果。
+      eligibility_ref: saga-recovery
+      ip: ${SAGA_REGISTER_IP}
+      port: ${SAGA_REGISTER_PORT:2070}
+      consul:
+        check:
+          mode: ttl
+          ttl_ms: 15000
+          report_interval_ms: 5000

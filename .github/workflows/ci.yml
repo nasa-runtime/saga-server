@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        toolchain: ["1.94.0"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Rust
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+      - name: Format
+        run: cargo +${{ matrix.toolchain }} fmt --all --check
+      - name: Lint
+        run: cargo +${{ matrix.toolchain }} clippy --all-targets --locked -- -D warnings
+      - name: Build
+        run: cargo +${{ matrix.toolchain }} build --locked --bin saga-server
+      - name: Documentation
+        run: cargo +${{ matrix.toolchain }} doc --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Source archive
+        run: cargo +${{ matrix.toolchain }} package --locked
+
+  image:
+    if: startsWith(github.ref, 'refs/heads/release/') && github.event_name != 'pull_request'
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Read package version
+        id: package
+        run: |
+          python3 docker/package-version.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build image archive
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          tags: saga-server:build-${{ github.sha }}-${{ matrix.arch }}
+          build-args: |
+            APP_VERSION=${{ steps.package.outputs.version }}
+            SOURCE_REVISION=${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/saga-server-${{ matrix.arch }}.tar
+          cache-from: type=gha,scope=saga-server-${{ matrix.arch }}
+          cache-to: type=gha,scope=saga-server-${{ matrix.arch }},mode=max
+          provenance: false
+      - name: Retain image archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/saga-server-${{ matrix.arch }}.tar
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error

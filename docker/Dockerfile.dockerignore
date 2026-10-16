@@ -1,0 +1,12 @@
+**
+!Cargo.toml
+!Cargo.lock
+!src
+!src/**
+!zcf
+!zcf/*.yml
+!LICENSE-MIT
+!LICENSE-APACHE
+!docker
+!docker/Dockerfile
+!docker/Dockerfile.dockerignore

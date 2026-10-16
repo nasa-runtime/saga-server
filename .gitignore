@@ -1,0 +1,11 @@
+/target/
+/tests/
+/deploy-local/
+/.idea/
+/.vscode/
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
+*.log

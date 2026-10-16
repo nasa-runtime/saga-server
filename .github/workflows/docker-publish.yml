@@ -1,0 +1,82 @@
+name: Publish Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Build run from release/<package version> containing the image archives
+        required: true
+        type: string
+      amd64_config_digest:
+        description: Validated amd64 archive config digest including sha256 prefix
+        required: true
+        type: string
+      arm64_config_digest:
+        description: Validated arm64 archive config digest including sha256 prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dockerhub-saga-server
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      AMD64_CONFIG_DIGEST: ${{ inputs.amd64_config_digest }}
+      ARM64_CONFIG_DIGEST: ${{ inputs.arm64_config_digest }}
+      HUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify source and completed build
+        run: |
+          python3 docker/verify-source.py
+      - name: Download image archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id }}
+          pattern: image-*
+          merge-multiple: true
+          path: image-archives
+      - name: Verify exact image identities
+        run: |
+          python3 docker/verify-images.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Sign in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Verify registry version ownership
+        run: |
+          python3 docker/registry-check.py
+      - name: Upload exact images and version manifest
+        if: env.PUBLISH_VERSION == 'true'
+        run: bash docker/publish-images.sh
+      - name: Verify uploaded version
+        env:
+          REQUIRE_VERSION_PRESENT: 'true'
+        run: python3 docker/registry-check.py
+      - name: Publish repository overview
+        env:
+          HUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          python3 docker/publish-overview.py
+      - name: Update latest to the published version
+        run: bash docker/publish-latest.sh
+      - name: Verify latest content
+        env:
+          REQUIRE_VERSION_PRESENT: 'true'
+          VERIFY_LATEST: 'true'
+        run: python3 docker/registry-check.py
