@@ -178,6 +178,8 @@ with urllib.request.urlopen(request, timeout=10) as response:
 
 NASA 业务服务也可使用受管远程 Saga client，避免自行处理签名。需要将业务事实与发起意图一起提交时使用 reliable client 的本地事务 Outbox；直接 HTTP 调用与业务数据库提交之间没有跨服务原子保证。
 
+需要同时查询定义、发起与查询实例时，可使用 [Python 命令行示例](../examples/saga-http.py)，按[完整调用步骤](../README.md#发起和查询一个-saga)设置 `SAGA_BASE_URL`、`SAGA_HTTP_PRODUCER`、`SAGA_HTTP_KEY`。该示例只使用 Python 3 标准库，拒绝重定向，每次调用创建新 nonce，保持输入的业务身份不变。`definition` 使用 Registry caller 的凭据，`start` 与 `get` 使用具有相应权限的 caller；不能因请求指向同一服务而混用密钥。
+
 ## 接口与失败语义
 
 所有路径以实际 `saga.http.base_path` 为前缀，默认 `/_nasa/saga`，保留框架原生 HTTP 状态。

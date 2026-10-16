@@ -44,6 +44,13 @@ flowchart LR
 
 ## 配置与凭据
 
+以下命令在源码仓库根目录执行；只使用容器的部署方也可按 [Docker Hub 使用说明](docker/README.md)下载所需配置，不必安装 Rust。
+
+```sh
+git clone --branch release https://github.com/nasa-runtime/saga-server.git
+cd saga-server
+```
+
 主配置位于镜像 `/app/zcf/application.yml`；默认导入 `${SAGA_YML:/etc/saga-server/*.yml}`。同一通配模式按文件名自然顺序合并，后面的文件覆盖前面文件，列表整体替换。没有匹配文件、无效配置或缺少必需凭据时拒绝启动。
 
 ```sh
@@ -96,10 +103,11 @@ SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:54
 
 ## Docker 启动
 
-`SAGA_IMAGE` 指向部署方镜像仓库中的完整标签或 digest；以下使用本地镜像名 `saga-server:1.0.0`。镜像采用 Alpine、UID/GID `10001:10001`。上述环境文件将 `SAGA_LOG_PATH` 显式设为空，只输出控制台日志，可使用只读根文件系统；未设置该变量时，默认文件日志目录为 `/usr/local/logs/${application.name}`，需要挂载 UID 10001 可写目录。
+`SAGA_IMAGE` 指向完整标签或 digest；以下使用 `nasaruntime/saga-server:1.0.0`。镜像采用 Alpine、UID/GID `10001:10001`。上述环境文件将 `SAGA_LOG_PATH` 显式设为空，只输出控制台日志，可使用只读根文件系统；未设置该变量时，默认文件日志目录为 `/usr/local/logs/${application.name}`，需要挂载 UID 10001 可写目录。挂载配置须允许 UID 10001 读取，密钥只从环境文件注入。
 
 ```sh
-export SAGA_IMAGE=saga-server:1.0.0
+export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
+docker pull "$SAGA_IMAGE"
 docker run -d --name saga-server \
   --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
@@ -129,6 +137,54 @@ curl --fail http://127.0.0.1:2070/readyz
 
 Docker 内置健康检查访问 `2070/readyz`。`/healthz` 表示进程存活，`/readyz` 表示可接收业务，两者不能互相替代。启动和停机预算均为 60 秒，容器停止宽限期应更长。监控端口 `9464` 只供受信网络抓取，不应直接暴露到公网。
 
+### Docker Compose 部署
+
+也可使用仓库中的 [Compose 配置](docker/compose.yml)，它复用同一环境文件和授权目录，连接已有数据库。以下与上面的 `docker run` 二选一，不要同时占用宿主机 2070 端口：
+
+```sh
+docker compose -p saga -f docker/compose.yml pull
+docker compose -p saga -f docker/compose.yml up -d
+docker compose -p saga -f docker/compose.yml ps
+docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+仅在计划维护或升级时执行 `docker compose -p saga -f docker/compose.yml stop`。再次启动使用原数据库、原副本身份与信任配置；不要为了新增业务流程执行停机。需要同时运行监控时直接使用下方监控 Compose，它已经包含协调服务。
+
+## 发起和查询一个 Saga
+
+先接入一个流程拥有方和步骤参与方，按[业务接入指南](docs/integration.md#参与方与流程拥有方)完成本地持久存储、签名定义发布和能力续租。协调镜像没有内置 `order_checkout` 或业务步骤；下面假设业务方已发布该流程的定义版本 `1`，首步骤接受 `order_id` 与 `quantity`。业务方新增流程通过相同协议上报，服务端保持运行。
+
+[HTTP 示例程序](examples/saga-http.py)只依赖 Python 3 标准库，支持查询定义、创建实例和查询状态。`SAGA_HTTP_KEY` 填对应 caller 的密钥，不能混用 worker 和 API caller 的密钥；交互输入时不回显。
+
+```sh
+export SAGA_BASE_URL=http://127.0.0.1:2070/_nasa/saga
+export SAGA_HTTP_PRODUCER=order-worker
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+python3 examples/saga-http.py definition \
+  --tenant system --workflow order_checkout --definition-version 1
+```
+
+以上输入 `SAGA_WORKER_KEY` 的值，确认定义已激活后再发起。切换为 `order-api`，再次输入 `SAGA_CLIENT_KEY` 的值，并准备与流程合同一致的输入：
+
+```sh
+export SAGA_HTTP_PRODUCER=order-api
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+cat > deploy-local/order.json <<'JSON'
+{"order_id":"order-1001","quantity":1}
+JSON
+python3 examples/saga-http.py start \
+  --tenant system --workflow order_checkout --definition-version 1 \
+  --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
+  --input-file deploy-local/order.json
+python3 examples/saga-http.py get --tenant system --saga-id order-1001
+unset SAGA_HTTP_KEY
+```
+
+创建返回 HTTP 200 的 `Committed` 或 `Duplicate` 只表示创建事实已持久化，最终状态由查询确认。结果不明时保留原实例 ID、业务键、触发 ID 和输入，再次执行同一命令会生成新的 nonce 和签名；不要换成新事务 ID。示例不自动重试、不跟随 HTTP 重定向，失败保留原 HTTP 状态，详细权限和失败处理见[接口合同](docs/integration.md#接口与失败语义)。
+
 ## 使用 Nacos
 
 在同一份环境文件中增加：
@@ -157,6 +213,31 @@ profile 会发布 `saga-server` 与 `saga-server-recovery` 两个服务，分别
 任务选主或状态复制。`APP_PROFILE=multi-nacos` 将同一副本发布到 `primary`、`secondary` 两套
 环境，配置见[多注册中心部署](docs/discovery.md)。`APP_PROFILE=consul` 使用 Consul 固定 agent
 和独立 TTL 检查；自定义挂载配置可以同时组合不同后端。
+
+双 Nacos 在上面单套配置的基础上，将 `APP_PROFILE` 改为 `multi-nacos`，再增加第二套完整变量：
+
+```dotenv
+APP_PROFILE=multi-nacos
+SECONDARY_NACOS_SERVER_ADDR=http://nacos-secondary.internal:8848/nacos/
+SECONDARY_NACOS_NAMESPACE=public
+SECONDARY_NACOS_GROUP=SAGA_GROUP
+SECONDARY_NACOS_USERNAME=YOUR_SECONDARY_NACOS_USERNAME
+SECONDARY_NACOS_PASSWORD=YOUR_SECONDARY_NACOS_PASSWORD
+SECONDARY_REGISTER_IP=192.168.20.20
+SECONDARY_REGISTER_PORT=22070
+```
+
+两个网络入口分别发布 `192.168.10.20:12070:2070` 和 `192.168.20.20:22070:2070`，转发至同一个容器的 2070 端口；IP 必须属于宿主机或由受信网关提供。两个环境各自发现自己的可达地址，共享同一套 Saga 数据。Consul 单后端在同一环境文件选择以下配置，替换原 `APP_PROFILE`：
+
+```dotenv
+APP_PROFILE=consul
+CONSUL_API_ADDR=http://consul.internal:8500
+CONSUL_AGENT_ADDR=http://consul-agent.internal:8500
+CONSUL_DATACENTER=dc1
+CONSUL_TOKEN=YOUR_CONSUL_TOKEN
+SAGA_REGISTER_IP=192.168.10.20
+SAGA_REGISTER_PORT=12070
+```
 
 ```mermaid
 flowchart LR
@@ -306,6 +387,8 @@ HTTP 签名覆盖实际 path 与原始 body。代理需透传 `x-saga-*` 请求�
 
 准备好 `deploy-local/config` 与 `deploy-local/saga.env`，设置 Grafana 管理密码后启动：
 
+此部署已包含协调服务，与单独的 `docker run` 或基础 Compose 二选一；首次部署时选择所需方式，避免端口冲突及相同副本身份同时运行。
+
 ```sh
 export GRAFANA_ADMIN_PASSWORD='REPLACE_WITH_A_STRONG_PASSWORD'
 docker compose -p saga-monitoring -f docker/monitoring/compose.yml up -d
@@ -314,6 +397,8 @@ docker compose -p saga-monitoring -f docker/monitoring/compose.yml up -d
 访问 Grafana `http://127.0.0.1:3000`，默认管理员名 `admin`，密码为上面的值；仪表盘位于 `Saga / Saga Server`。Prometheus 位于 `http://127.0.0.1:9090`。Compose 不创建业务数据库，数据库和参与方仍需在这个网络中可达。生产环境需要同步修改 Prometheus 配置中的环境、集群标签。
 
 完整指标、抓取安全、多副本聚合和现有监控平台接入见 [监控指南](docs/monitoring.md)。
+
+常用排查入口：`docker logs --tail 100 saga-server` 查看单容器日志；Compose 部署使用相应项目的 `logs` 命令。存活失败先查配置与数据库；已存活但未就绪时检查目录状态、能力续租和必要依赖；业务已就绪但新流程被拒绝时核对该定义是否激活、caller 权限与参与方合同。401 检查密钥和时钟，403 检查租户及流程授权，409 需要区分 HTTP 重放与业务身份冲突，503 不证明事务未提交。
 
 当前依赖组合下，`nasaga_stage_duration_seconds` 受指标预留容量限制，不能作为可用的阶段耗时数据源。仪表盘使用持久生命周期分位数，并通过 `nametrics_samples_rejected_total` 提示指标覆盖不完整；抓取成功不能替代业务就绪或流程状态检查。
 

@@ -1,6 +1,6 @@
 services:
   saga-server:
-    image: ${SAGA_IMAGE:-saga-server:1.0.0}
+    image: ${SAGA_IMAGE:-nasaruntime/saga-server:1.0.0}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

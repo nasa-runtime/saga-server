@@ -31,6 +31,13 @@ The template uses `workflows: ["*"]` for a trusted owner within explicitly autho
 
 ## Prepare configuration
 
+Run repository commands from its root directory. Container-only operators can download the required files using the [Docker Hub guide](docker/README.md) without installing Rust.
+
+```sh
+git clone --branch release https://github.com/nasa-runtime/saga-server.git
+cd saga-server
+```
+
 The image loads `/app/zcf/application.yml` and imports `${SAGA_YML:/etc/saga-server/*.yml}`. Files in each glob are merged in natural filename order; later files override earlier files and lists are replaced. Missing required imports or credentials prevent startup. Local configuration is loaded at startup and changes require a restart; the dynamic workflow catalog and participant leases are synchronized separately.
 
 ```sh
@@ -77,10 +84,11 @@ SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:54
 
 ## Run with Docker
 
-Set `SAGA_IMAGE` to your distribution registry's image tag or digest. These commands use the local image name `saga-server:1.0.0`:
+Set `SAGA_IMAGE` to an explicit image tag or digest. These commands use `nasaruntime/saga-server:1.0.0`:
 
 ```sh
-export SAGA_IMAGE=saga-server:1.0.0
+export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
+docker pull "$SAGA_IMAGE"
 docker run -d --name saga-server \
   --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
@@ -98,6 +106,54 @@ The Alpine image runs as UID/GID `10001:10001`. The environment file above expli
 Registry connections are disabled by default. Call the HTTP API at `http://saga-server:2070/_nasa/saga` on a shared Docker network, or at the host's reachable mapped address. The example's loopback publication is host local; bind a specific private host IP for remote clients. Container `localhost` is the container itself: database and participant endpoints must be reachable from the container.
 
 `SAGA_YML` changes the import path. `APP__SERVER__PORT` changes the listener; update Docker's health check, port mapping and Prometheus targets together. The embedded health check uses `2070/readyz`. `/healthz` is liveness; `/readyz` is business readiness. Startup and shutdown budgets are 60 seconds, so use a longer container stop timeout.
+
+### Docker Compose
+
+The [base Compose file](docker/compose.yml) uses the same configuration directory and environment file, and connects to your existing database. Choose this or the preceding `docker run` deployment; do not start both on host port 2070 or with the same replica identity.
+
+```sh
+docker compose -p saga -f docker/compose.yml pull
+docker compose -p saga -f docker/compose.yml up -d
+docker compose -p saga -f docker/compose.yml ps
+docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+Use `docker compose -p saga -f docker/compose.yml stop` only for planned maintenance or upgrades. Restart with the original database, replica identity and trust configuration. New business workflows do not require stopping the coordinator. The monitoring Compose below already includes the coordinator, so choose that stack directly when monitoring is needed.
+
+## Start and query a Saga
+
+First deploy a workflow owner and step participants using the [participant configuration](docs/integration.md#参与方与流程拥有方). They provide persistent business processing, signed definitions and renewable capabilities. The coordinator image has no built-in `order_checkout` workflow or business steps. The following example assumes version `1` is published and accepts `order_id` and `quantity` as the first step's input.
+
+The [HTTP example](examples/saga-http.py) uses only the Python 3 standard library. Query the definition with `order-worker`; enter its `SAGA_WORKER_KEY` at the hidden input prompt:
+
+```sh
+export SAGA_BASE_URL=http://127.0.0.1:2070/_nasa/saga
+export SAGA_HTTP_PRODUCER=order-worker
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+python3 examples/saga-http.py definition \
+  --tenant system --workflow order_checkout --definition-version 1
+```
+
+After confirming activation, switch to `order-api` and enter its `SAGA_CLIENT_KEY`. Keep workflow and input contracts consistent with your business implementation:
+
+```sh
+export SAGA_HTTP_PRODUCER=order-api
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+cat > deploy-local/order.json <<'JSON'
+{"order_id":"order-1001","quantity":1}
+JSON
+python3 examples/saga-http.py start \
+  --tenant system --workflow order_checkout --definition-version 1 \
+  --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
+  --input-file deploy-local/order.json
+python3 examples/saga-http.py get --tenant system --saga-id order-1001
+unset SAGA_HTTP_KEY
+```
+
+HTTP 200 with `Committed` or `Duplicate` acknowledges the durable creation fact; query the instance to determine the eventual business outcome. On an ambiguous response, keep the same instance, business key, trigger ID and input. Re-running the command creates a fresh nonce and signature. The example makes one attempt, preserves HTTP errors and refuses redirects; it does not automatically retry. See the [API contract](docs/integration.md#接口与失败语义).
 
 ## Named registry connections
 
@@ -129,10 +185,37 @@ eligibility, while the latter remains reachable for authenticated capability ren
 `SECONDARY_NACOS_PASSWORD`, `SECONDARY_REGISTER_IP` and `SECONDARY_REGISTER_PORT`. Each connection
 publishes both business and recovery registrations, with its own reachable endpoint and credentials.
 
+Append the second connection to the first Nacos configuration and replace its `APP_PROFILE`:
+
+```dotenv
+APP_PROFILE=multi-nacos
+SECONDARY_NACOS_SERVER_ADDR=http://nacos-secondary.internal:8848/nacos/
+SECONDARY_NACOS_NAMESPACE=public
+SECONDARY_NACOS_GROUP=SAGA_GROUP
+SECONDARY_NACOS_USERNAME=YOUR_SECONDARY_NACOS_USERNAME
+SECONDARY_NACOS_PASSWORD=YOUR_SECONDARY_NACOS_PASSWORD
+SECONDARY_REGISTER_IP=192.168.20.20
+SECONDARY_REGISTER_PORT=22070
+```
+
+Map both reachable endpoints to the same container listener, for example `192.168.10.20:12070:2070` and `192.168.20.20:22070:2070`. Those IPs must belong to the host or be provided by trusted gateways. Each environment discovers its own reachable endpoint while sharing the same Saga database.
+
 `APP_PROFILE=consul` uses `CONSUL_API_ADDR`, a fixed `CONSUL_AGENT_ADDR`, `CONSUL_DATACENTER`, optional
 `CONSUL_TOKEN`, and `SAGA_REGISTER_IP` / `SAGA_REGISTER_PORT`. TTL checks follow local eligibility.
 For mixed providers, omit the profile and supply a complete discovery block in mounted configuration.
 See [configuration examples and boundaries](docs/discovery.md) and the [profiles](zcf/application-multi-nacos.yml).
+
+For a single Consul backend, replace the profile and advertised endpoint with:
+
+```dotenv
+APP_PROFILE=consul
+CONSUL_API_ADDR=http://consul.internal:8500
+CONSUL_AGENT_ADDR=http://consul-agent.internal:8500
+CONSUL_DATACENTER=dc1
+CONSUL_TOKEN=YOUR_CONSUL_TOKEN
+SAGA_REGISTER_IP=192.168.10.20
+SAGA_REGISTER_PORT=12070
+```
 
 The four built-in registration names preserve numeric port types when using their environment variables.
 For additional registration names, write ports as YAML integers and policies such as `startup_required`
@@ -298,6 +381,8 @@ dashboard and alerts cover Saga, Outbox and scrape status; add per-registration 
 platform as described in the [discovery metrics guide](docs/monitoring.md#发现连接与注册目标).
 
 With `deploy-local/config` and `deploy-local/saga.env` ready:
+
+This stack already includes the coordinator. Choose it instead of the standalone container or base Compose deployment to avoid port and replica identity conflicts.
 
 ```sh
 export GRAFANA_ADMIN_PASSWORD='REPLACE_WITH_A_STRONG_PASSWORD'

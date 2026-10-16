@@ -1,0 +1,18 @@
+services:
+  saga-server:
+    image: ${SAGA_IMAGE:-nasaruntime/saga-server:1.0.0}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 70s
+    env_file: ../deploy-local/saga.env
+    ports:
+      - "127.0.0.1:2070:2070"
+    volumes:
+      - ../deploy-local/config:/etc/saga-server:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

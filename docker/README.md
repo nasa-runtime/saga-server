@@ -36,6 +36,9 @@ Nacos、Consul 只负责入口定位。具名 `qualifier` 不跨环境回退，�
 
 ```sh
 mkdir -p deploy-local/config
+curl --fail --location \
+  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/config/10-security.yml \
+  --output deploy-local/config/10-security.yml
 ```
 
 创建 `deploy-local/saga.env`，以下值需要由部署方填写，文件不要提交到仓库：
@@ -54,11 +57,28 @@ SAGA_WORKER_KEY=REPLACE_WITH_ANOTHER_64_LOWERCASE_HEX_CHARACTERS
 SAGA_DEFINITION_PUBLIC_KEY=REPLACE_WITH_BASE64_SPKI_ED25519_PUBLIC_KEY
 ```
 
-每个 HMAC 密钥分别使用 `openssl rand -hex 32` 生成。定义公钥为 Base64 编码的 SPKI DER，流程拥有方保管对应 PKCS8 DER 私钥，协调器只接收公钥。生成方法、权限和协议见[业务接入](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。切换 PostgreSQL 时使用 `SAGA_DATABASE_DRIVER=postgresql` 和 `postgres://...` URL。运行账号需要组件初始化所需的 DDL 权限及持久表读写权限。
+每个 HMAC 密钥分别使用 `openssl rand -hex 32` 生成。定义公钥为 Base64 编码的 SPKI DER，流程拥有方保管对应 PKCS8 DER 私钥，协调器只接收公钥。以下在本地生成密钥；将最后一条命令的输出填入 `SAGA_DEFINITION_PUBLIC_KEY`，私钥不能挂载给协调器。
+
+```sh
+umask 077
+openssl genpkey -algorithm ED25519 -out deploy-local/definition-private.pem
+openssl pkey -in deploy-local/definition-private.pem -pubout -outform DER -out deploy-local/definition-public.der
+openssl base64 -A -in deploy-local/definition-public.der
+```
+
+参与方需要签名私钥时，由私钥持有方执行 `openssl pkcs8 -topk8 -nocrypt -in deploy-local/definition-private.pem -outform DER -out deploy-local/definition-private.der`，再用 `openssl base64 -A -in deploy-local/definition-private.der` 取得 PKCS8 DER 的 Base64 文本，仅交给流程拥有方。具体权限和协议见[业务接入](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。
+
+运行账号需要组件初始化所需的 DDL 权限及持久表读写权限，数据库须预先创建。切换 PostgreSQL 时在同一环境文件替换以下两行，其余启动命令相同：
+
+```dotenv
+SAGA_DATABASE_DRIVER=postgresql
+SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:5432/saga_control
+```
 
 ```sh
 chmod 600 deploy-local/saga.env
 export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
+docker pull "$SAGA_IMAGE"
 docker run --detach --name saga-server \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
@@ -72,6 +92,24 @@ curl --fail http://127.0.0.1:2070/readyz
 ```
 
 空日志路径只输出控制台；不设置时默认文件日志目录为 `/usr/local/logs/${application.name}`，必须挂载 UID 10001 可写目录。容器内 `localhost` 指向容器自身；数据库和参与方必须使用容器可达地址。上例只允许宿主机访问，跨主机部署需指定受控内网 IP 和防火墙。
+
+### 使用 Docker Compose
+
+基础 Compose 连接已有数据库，复用上述 `deploy-local` 目录；无需安装 Rust。与 `docker run` 二选一，避免重复副本身份及宿主机端口冲突：
+
+```sh
+mkdir -p docker
+curl --fail --location \
+  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/docker/compose.yml \
+  --output docker/compose.yml
+docker compose -p saga -f docker/compose.yml pull
+docker compose -p saga -f docker/compose.yml up -d
+docker compose -p saga -f docker/compose.yml ps
+docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+挂载目录与 YAML 必须允许 UID 10001 读取。只在计划维护或升级时执行 `docker compose -p saga -f docker/compose.yml stop`；重新启动时保留原数据库、服务身份、副本身份及信任配置。新增业务流程由业务方动态上报，不需要停止协调器。
 
 ## Nacos、Consul 与多注册中心
 
@@ -90,7 +128,80 @@ SAGA_REGISTER_PORT=12070
 
 对应端口映射改为 `192.168.10.20:12070:2070`。Nacos 使用 Nacos 3 HTTP API，不需要 SDK gRPC 端口。默认发布 `saga-server` 和 `saga-server-recovery`；Saga 身份及映射端点 metadata 由框架生成，不能用手工同名注册代替。
 
-`APP_PROFILE=multi-nacos` 向两套 Nacos 发布；`APP_PROFILE=consul` 使用固定 Consul agent 和 TTL 检查。Nacos/Consul 混合环境使用挂载配置。Kubernetes adapter 只读，部署方提供原生 Service 或受信代理入口。[完整多注册中心配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/discovery.md)说明独立凭据、qualifier、映射端口和恢复通道。
+双 Nacos 保留第一套变量，将 `APP_PROFILE` 改为 `multi-nacos`，再增加第二套配置：
+
+```dotenv
+APP_PROFILE=multi-nacos
+SECONDARY_NACOS_SERVER_ADDR=http://nacos-secondary.internal:8848/nacos/
+SECONDARY_NACOS_NAMESPACE=public
+SECONDARY_NACOS_GROUP=SAGA_GROUP
+SECONDARY_NACOS_USERNAME=YOUR_SECONDARY_NACOS_USERNAME
+SECONDARY_NACOS_PASSWORD=YOUR_SECONDARY_NACOS_PASSWORD
+SECONDARY_REGISTER_IP=192.168.20.20
+SECONDARY_REGISTER_PORT=22070
+```
+
+容器或网关提供两条到同一 listener 的映射，例如 `192.168.10.20:12070:2070` 与 `192.168.20.20:22070:2070`；IP 必须属于宿主机或由受信网关提供。两套连接分别名为 `primary`、`secondary`，各自发布普通与恢复入口，共享数据库事实。
+
+单 Consul 使用以下变量替换原 profile 和发布端点；agent 地址必须固定到管理本副本记录的 agent：
+
+```dotenv
+APP_PROFILE=consul
+CONSUL_API_ADDR=http://consul.internal:8500
+CONSUL_AGENT_ADDR=http://consul-agent.internal:8500
+CONSUL_DATACENTER=dc1
+CONSUL_TOKEN=YOUR_CONSUL_TOKEN
+SAGA_REGISTER_IP=192.168.10.20
+SAGA_REGISTER_PORT=12070
+```
+
+Nacos/Consul 混合部署时不设置 `APP_PROFILE`，将[混合配置](https://github.com/nasa-runtime/saga-server/blob/release/examples/config/discovery-mixed.yml)保存到挂载目录，再填写两套凭据和端点。Kubernetes adapter 只读，部署方提供原生 Service 或受信代理入口。
+
+Rust 业务可保留自己的 `primary` 连接，另外配置名为 `saga-infra` 的协调连接，在 `saga.discovery` 中用 `qualifier: saga-infra` 选择它。新 Saga 使用普通服务别名，能力登记、续租与结果回传使用恢复别名。固定 HTTP 地址无需 qualifier；显式 qualifier 不可用时不会切到其它环境。[完整发现配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/discovery.md#qualifier-与业务方接入)包含可合并的客户端 YAML。
+
+## 从业务定义到事务结果
+
+本镜像没有内置业务工作流。先按[参与方接入](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md#参与方与流程拥有方)部署业务服务：流程拥有方使用 `#[nasa::saga_workflow]` 声明完整定义，受管客户端签名发布；各步骤参与方持久化本地业务事实并登记、续租能力。定义和步骤合同满足激活策略后才能创建实例。Java、Go 服务需要相应的 Saga 协议适配层，普通 REST 接口不能直接作为步骤。
+
+以下假设已动态发布 `order_checkout` 定义版本 `1`，首步骤接受 `order_id` 和 `quantity`。下载 Python 3 标准库示例，并先用 `order-worker` 和其 `SAGA_WORKER_KEY` 查询定义；交互输入的密钥不回显：
+
+```sh
+mkdir -p examples
+curl --fail --location \
+  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/saga-http.py \
+  --output examples/saga-http.py
+export SAGA_BASE_URL=http://127.0.0.1:2070/_nasa/saga
+export SAGA_HTTP_PRODUCER=order-worker
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+python3 examples/saga-http.py definition \
+  --tenant system --workflow order_checkout --definition-version 1
+```
+
+确认定义已激活后，将调用身份切换为 `order-api`，输入 `SAGA_CLIENT_KEY`，创建并查询事务：
+
+```sh
+export SAGA_HTTP_PRODUCER=order-api
+read -r -s SAGA_HTTP_KEY
+export SAGA_HTTP_KEY
+cat > deploy-local/order.json <<'JSON'
+{"order_id":"order-1001","quantity":1}
+JSON
+python3 examples/saga-http.py start \
+  --tenant system --workflow order_checkout --definition-version 1 \
+  --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
+  --input-file deploy-local/order.json
+python3 examples/saga-http.py get --tenant system --saga-id order-1001
+unset SAGA_HTTP_KEY
+```
+
+示例仅发送一次请求，保留真实 HTTP 状态，不自动重试或跟随重定向。`Committed` 和 `Duplicate` 是创建结果，不能代替最终业务结果。超时或 503 后保留相同实例身份与输入，重新签名后查询或有界重试，不能生成另一个实例代替原事务。协议字段、签名格式及全部接口见[业务 API](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md#发起与查询)。
+
+## 多副本与持续运行
+
+所有协调副本连接同一个数据库，保持相同逻辑服务身份、信任配置和分页密钥；分别设置 `SAGA_REPLICA_ID=saga-server-0`、`saga-server-1`，重启后保持原值。数据库和负载均衡器的高可用由部署方提供，多注册中心不复制数据库。
+
+新业务流量只进入 `/readyz` 通过的副本；能力续租、定义同步和结果回传必须保留独立恢复通道。启用内置 discovery profile 时可用 `/discovery/eligible/primary-recovery` 检查恢复资格；固定 URL 部署保留受信恢复路径及平台停机摘流。不能因为参与能力过期而阻断全部 Registry 请求，否则参与方无法重新登记。恢复入口继续执行认证和事务门禁，不赋予新 Saga 越过业务就绪的权限。
 
 ## 调用、恢复与观测
 
@@ -101,6 +212,33 @@ SAGA_REGISTER_PORT=12070
 `9464/metrics` 提供 nafana 应用、Outbox 和发现指标，`2070/_nasa/saga/metrics` 提供持久 Saga 状态和生命周期分位数。只允许监控网络访问；多副本共享数据库指标按同一数据库去重，不能直接求和。当前阶段耗时直方图受预留容量限制，使用生命周期分位数并监控指标拒绝计数。[监控配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/monitoring.md)包含 Prometheus、Grafana、告警和聚合语义。
 
 业务通信、配置与监控部署的完整说明：[中文](https://github.com/nasa-runtime/saga-server/blob/release/README.md)、[English](https://github.com/nasa-runtime/saga-server/blob/release/README.en.md)。
+
+### Prometheus 与 Grafana 部署示例
+
+监控 Compose 已包含协调服务，首次部署时与单独运行方式二选一。取得源码后，在仓库根目录准备同样的 `deploy-local/config` 与 `deploy-local/saga.env`：
+
+```sh
+git clone --branch release https://github.com/nasa-runtime/saga-server.git
+cd saga-server
+export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
+export GRAFANA_ADMIN_PASSWORD='REPLACE_WITH_A_STRONG_PASSWORD'
+docker compose -p saga-monitoring -f docker/monitoring/compose.yml up -d
+docker compose -p saga-monitoring -f docker/monitoring/compose.yml ps
+```
+
+Grafana 为 `http://127.0.0.1:3000`，账号 `admin`，密码为上述值，仪表盘为 `Saga / Saga Server`；Prometheus 为 `http://127.0.0.1:9090`。Compose 不创建业务数据库。环境、集群、服务标签要与抓取配置一致；共享数据库指标按相同数据库去重，不能把多副本数量直接相加。
+
+### 常见状态
+
+| 现象 | 检查内容 |
+| --- | --- |
+| 容器启动失败 | 导入文件、必填凭据、数据库可达性和初始化权限；`docker logs --tail 100 saga-server` |
+| `/healthz` 成功但 `/readyz` 失败 | 动态目录、步骤能力续租、必要依赖和恢复入口是否仍可达 |
+| 服务就绪但新流程无法创建 | 指定定义是否激活、tenant/workflow 授权、步骤合同和参与端点 |
+| HTTP 401 / 403 | 分别检查签名与时钟、调用身份和授权范围 |
+| HTTP 409 | 区分原 HTTP 请求重放与业务身份、内容、定义版本冲突 |
+| HTTP 超时或 503 | 结果可能已经提交，保留原身份查询或重新签名后有界重试 |
+| 单个注册中心不可用 | 核对该 qualifier 的证据与目标状态，不能依赖跨环境回退 |
 
 ## 源码构建与镜像发布
 
