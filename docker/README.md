@@ -111,7 +111,7 @@ GitHub Actions 使用以下仓库配置：
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
 | Variable | `DOCKERHUB_USERNAME` | 有目标仓库推送及更新仓库说明权限的账号 |
-| Variable | `DOCKERHUB_NAMESPACE` | `nasaruntime`，与镜像名及文档一致 |
+| Variable（可选） | `DOCKERHUB_NAMESPACE` | 默认 `nasaruntime`，无需配置；与镜像名及文档一致 |
 | Secret | `DOCKERHUB_TOKEN` | 上述账号的访问凭据，不写入源码、环境样例或日志 |
 
 当前流程同时推送镜像并更新仓库说明，使用个人访问令牌（PAT），权限选择 `Repo Read, Write, Delete`（`repo:admin`），账号需要具有目标仓库的管理权限。在 Docker Home 的头像菜单进入 Account settings → Personal access tokens → Generate new token 创建，生成后将值保存到 GitHub 仓库的 `DOCKERHUB_TOKEN` Secret。权限范围和创建步骤见 [Docker Token 权限说明](https://docs.docker.com/security/access-tokens/reference/)与[个人令牌指南](https://docs.docker.com/security/access-tokens/personal-access-tokens/)。

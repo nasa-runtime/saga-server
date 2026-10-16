@@ -34,7 +34,7 @@ jobs:
       BUILD_RUN_ID: ${{ inputs.build_run_id }}
       AMD64_CONFIG_DIGEST: ${{ inputs.amd64_config_digest }}
       ARM64_CONFIG_DIGEST: ${{ inputs.arm64_config_digest }}
-      HUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
+      HUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'nasaruntime' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Verify source and completed build
