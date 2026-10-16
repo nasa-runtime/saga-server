@@ -4,7 +4,7 @@
 
 `saga-server` is a standalone NASA Saga orchestrator. Operators run the image and mount deployment configuration; business services publish workflow definitions, implement participant steps and start Sagas. Each business project can use the same coordinator image without assembling a server from NASA source.
 
-The entry point uses `#[nasa::application]`. napp manages the database, Saga runtime, Outbox, HTTP listener, logging, named discovery connections and the nafana metrics exporter. The application uses `nasa 2.0.3` from crates.io; it does not duplicate the coordination engine or storage implementation.
+The entry point uses `#[nasa::application]`. napp manages the database, Saga runtime, Outbox, HTTP listener, logging, named discovery connections and the nafana metrics exporter. The application uses `nasa 2.0.5` from crates.io; it does not duplicate the coordination engine or storage implementation.
 
 The coordinator stays running when an already trusted business service introduces a workflow. Managed clients publish signed definitions and step capabilities, then submit transaction instance IDs. This does not require editing server YAML, reloading configuration or restarting saga-server.
 
@@ -393,13 +393,13 @@ Grafana: `http://127.0.0.1:3000`, user `admin`, your configured password, dashbo
 
 Scrape every replica directly. Database backed gauges and counters are shared facts: aggregate with `max` over replicas of the same database, not `sum`. Different databases need different cluster or service labels. Lifetime quantiles are not sliding window quantiles and cannot be added or averaged. `up=1` means scrape success, not business readiness; monitor `/readyz` independently.
 
-With the current dependency combination, the `nasaga_stage_duration_seconds` source exceeds its reserved metric capacity. The dashboard uses available persistent lifecycle quantiles and exposes `nametrics_samples_rejected_total` to show incomplete metric coverage. Prometheus rules cover scrape failures, manual intervention and timer backlog; notification delivery requires your Alertmanager or Grafana contact points.
+`nasaga_stage_duration_seconds` exports process histograms for five fixed stages, totaling 85 series, with counters reset on process restart. The dashboard uses persistent lifecycle quantiles from database facts, which have a different scope. Nonzero `nametrics_samples_rejected_total` requires checking metric capacity. Prometheus rules cover scrape failures, manual intervention and timer backlog; notification delivery requires your Alertmanager or Grafana contact points.
 
 Detailed [monitoring configuration](docs/monitoring.md) and [business integration](docs/integration.md) include endpoint, authentication, permissions and failure semantics. The upstream [Saga production guide](https://github.com/nasa-runtime/nasa-runtime-rust/blob/master/docs/saga-production.md) defines participant and workflow contracts. Successful start returns HTTP 200 with `Committed` or `Duplicate`; completion is queried separately. Errors keep native HTTP status codes and may have an empty body. On an ambiguous timeout, retry the same business intent with a fresh HMAC nonce instead of creating another Saga identity.
 
 ## Build the image
 
-Source and image builds use `nasa 2.0.3` from crates.io, with the full dependency graph pinned by `Cargo.lock`. Use Rust 1.94 or later:
+Source and image builds use `nasa 2.0.5` from crates.io, with the full dependency graph pinned by `Cargo.lock`. Use Rust 1.94 or later:
 
 ```sh
 cargo build --locked --release

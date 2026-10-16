@@ -1987,9 +1987,9 @@ dependencies = [
 
 [[package]]
 name = "napp"
-version = "2.0.3"
+version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2923b41542ae7bf2775bc8fa2029ada8b1bc31bca6b86e91b8908c12b510317"
+checksum = "33cd49ce74bc60f7433d7e11419b8399254ae00c982c0cc4414f5e8733c8ba58"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2065,9 +2065,9 @@ dependencies = [
 
 [[package]]
 name = "nasa"
-version = "2.0.3"
+version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "866e3b59a1c5c34fe2ee201c0b933b582b6221fa1f43366e230ed1599ef32bd4"
+checksum = "05c57218f5860ed02e113270bb6716e5ba7002edd414a7b5e701a80e7540aa86"
 dependencies = [
  "nadisc",
  "nadisc-runtime",
@@ -2135,9 +2135,9 @@ dependencies = [
 
 [[package]]
 name = "nasaga-mysql"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3236690522b497b0f0c234aff1b41b50cc417266bcce5b3dc9f2786fc368d17a"
+checksum = "4ab79da34e17e439a3382865969a12251b23ec6a933754f9cfb5bcb842f8b653"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2165,9 +2165,9 @@ dependencies = [
 
 [[package]]
 name = "nasaga-runtime"
-version = "2.0.1"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f372e5a5c237e2d565764f861d6e3f3003c8bf4404ee89b035090848f43a3f0"
+checksum = "c19e4f65718c7f41a9f2e798ef7e38aea6690c2528e25ab3819d6c46562e942a"
 dependencies = [
  "anyhow",
  "hex",
@@ -2217,9 +2217,9 @@ dependencies = [
 
 [[package]]
 name = "nasaga-runtime-pgsql"
-version = "2.0.1"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "947c11384da7589674c45de7ffb25de3e8974dfc6f5038fd71acb5c6e4a1e7e7"
+checksum = "cde7da73a9fdc39e2f9b64c69570d501726658b648c9d7977d905e43eacf483f"
 dependencies = [
  "anyhow",
  "linkme",

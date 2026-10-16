@@ -4,7 +4,7 @@
 
 `saga-server` 是使用 NASA 组件构建的独立 Saga 协调服务。部署方运行容器并挂载配置，业务方注册流程定义、实现参与步骤并发起 Saga，无需为每个业务项目重新组装协调器或从 NASA 源码构建服务端。
 
-入口使用 `#[nasa::application]`，由 napp 接管数据库、Saga、Outbox、HTTP、日志、多注册中心以及 nafana 指标出口。应用使用 crates.io 的 `nasa 2.0.3`，协调状态机、协议、幂等与恢复机制均由 NASA 组件提供。
+入口使用 `#[nasa::application]`，由 napp 接管数据库、Saga、Outbox、HTTP、日志、多注册中心以及 nafana 指标出口。应用使用 crates.io 的 `nasa 2.0.5`，协调状态机、协议、幂等与恢复机制均由 NASA 组件提供。
 
 协调服务持续运行期间，已接入的业务服务可主动发布新的流程定义和步骤能力，再提交事务实例 ID；新增流程不需要修改服务端 YAML、热加载或重启。服务端配置管理基础设施与信任范围，业务流程保存在动态目录中。
 
@@ -400,11 +400,11 @@ docker compose -p saga-monitoring -f docker/monitoring/compose.yml up -d
 
 常用排查入口：`docker logs --tail 100 saga-server` 查看单容器日志；Compose 部署使用相应项目的 `logs` 命令。存活失败先查配置与数据库；已存活但未就绪时检查目录状态、能力续租和必要依赖；业务已就绪但新流程被拒绝时核对该定义是否激活、caller 权限与参与方合同。401 检查密钥和时钟，403 检查租户及流程授权，409 需要区分 HTTP 重放与业务身份冲突，503 不证明事务未提交。
 
-当前依赖组合下，`nasaga_stage_duration_seconds` 受指标预留容量限制，不能作为可用的阶段耗时数据源。仪表盘使用持久生命周期分位数，并通过 `nametrics_samples_rejected_total` 提示指标覆盖不完整；抓取成功不能替代业务就绪或流程状态检查。
+`nasaga_stage_duration_seconds` 输出五个固定阶段的进程内直方图，共 85 条序列，进程重启后重新累计。仪表盘使用数据库中的持久生命周期分位数，两者统计范围不同；`nametrics_samples_rejected_total` 非零时需检查指标容量，抓取成功不能替代业务就绪或流程状态检查。
 
 ## 构建与运行边界
 
-源码和镜像构建使用 crates.io 的 `nasa 2.0.3`，由 `Cargo.lock` 固定完整依赖图。使用 Rust 1.94 或更高版本构建：
+源码和镜像构建使用 crates.io 的 `nasa 2.0.5`，由 `Cargo.lock` 固定完整依赖图。使用 Rust 1.94 或更高版本构建：
 
 ```sh
 cargo build --locked --release

@@ -45,7 +45,7 @@ sequenceDiagram
 
 ## 参与方与流程拥有方
 
-源码接入可使用 crates.io 依赖 `nasa = { version = "2.0.3", features = ["application", "saga-runtime", "web"] }`；具名发现额外开启对应 provider feature。参与方使用 PostgreSQL 时改用 `saga-runtime-pgsql`。每个参与服务按自己的实际数据库选择对应适配器，协调端和参与端可以使用不同数据库。
+源码接入可使用 crates.io 依赖 `nasa = { version = "2.0.5", features = ["application", "saga-runtime", "web"] }`；具名发现额外开启对应 provider feature。参与方使用 PostgreSQL 时改用 `saga-runtime-pgsql`。每个参与服务按自己的实际数据库选择对应适配器，协调端和参与端可以使用不同数据库。
 
 业务侧使用 `#[nasa::saga_workflow]` 声明完整 `WorkflowDefinition`，使用 `#[nasa::saga(..., managed = true)]` 实现 `SagaStep`。步骤必须明确补偿、取消、超时及结果裁决语义。`#[nasa::application("saga", "web")]` 接管协议入口、Inbox、gate、Outbox、能力续租及定义发布；业务启动钩子只准备自己的业务资源。
 

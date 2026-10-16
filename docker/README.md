@@ -209,7 +209,7 @@ unset SAGA_HTTP_KEY
 
 `/healthz` 表示存活，`/readyz` 表示业务就绪。能力失效时普通入口可被撤出，恢复路径仍需允许受信续租和结果回传；恢复地址不会绕过鉴权或业务门禁。停机先撤销资格与注册，再排空资源，停止宽限期应大于 60 秒。
 
-`9464/metrics` 提供 nafana 应用、Outbox 和发现指标，`2070/_nasa/saga/metrics` 提供持久 Saga 状态和生命周期分位数。只允许监控网络访问；多副本共享数据库指标按同一数据库去重，不能直接求和。当前阶段耗时直方图受预留容量限制，使用生命周期分位数并监控指标拒绝计数。[监控配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/monitoring.md)包含 Prometheus、Grafana、告警和聚合语义。
+`9464/metrics` 提供 nafana 应用、Outbox 和发现指标，`2070/_nasa/saga/metrics` 提供持久 Saga 状态和生命周期分位数。只允许监控网络访问；多副本共享数据库指标按同一数据库去重，不能直接求和。阶段耗时直方图覆盖五个固定阶段，共 85 条序列；进程重启后重新累计。持久生命周期分位数另由数据库事实计算，指标拒绝计数用于识别出口容量不足。[监控配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/monitoring.md)包含 Prometheus、Grafana、告警和聚合语义。
 
 业务通信、配置与监控部署的完整说明：[中文](https://github.com/nasa-runtime/saga-server/blob/release/README.md)、[English](https://github.com/nasa-runtime/saga-server/blob/release/README.en.md)。
 

@@ -11,7 +11,7 @@
 
 两者都是 Prometheus 文本协议。第二个地址会查询数据库，抓取间隔默认 15 秒，不能使用高频抓取代替业务查询。`nasaga_lifecycle_duration_seconds` 的分位数由数据库中保留的终态事实计算，不能解释为任意 PromQL 时间窗口内的分位数。
 
-当前依赖组合下，`nasaga_stage_duration_seconds` 的直方图来源受指标预留容量限制，不能作为可用的阶段耗时数据源；`nametrics_samples_rejected_total{reason="cardinality_limit"}` 会反映这一缺失。仪表盘的耗时面板使用持久生命周期分位数，指标拒绝面板用于提示覆盖不完整。
+`nasaga_stage_duration_seconds` 输出五个固定阶段的进程内直方图，每个阶段包含 14 个有限桶、`+Inf`、`sum` 与 `count`，共 85 条序列；无样本的阶段也输出零值。进程重启后这些计数重新累计。`nametrics_samples_rejected_total{reason="cardinality_limit"}` 非零时表示指标容量不足，应检查出口预算，不能将缺失样本视为业务耗时为零。仪表盘的耗时面板仍使用持久生命周期分位数，与阶段直方图的统计范围不同。
 
 `up=1` 只表示本次抓取成功，不能证明 Saga Ready 或业务已完成。部署平台必须独立使用 `/readyz`；`/healthz` 用于存活检查。指标出口不决定 Saga 业务事务的提交结果。
 
