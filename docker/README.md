@@ -114,6 +114,8 @@ GitHub Actions 使用以下仓库配置：
 | Variable | `DOCKERHUB_NAMESPACE` | `nasaruntime`，与镜像名及文档一致 |
 | Secret | `DOCKERHUB_TOKEN` | 上述账号的访问凭据，不写入源码、环境样例或日志 |
 
+当前流程同时推送镜像并更新仓库说明，使用个人访问令牌（PAT），权限选择 `Repo Read, Write, Delete`（`repo:admin`），账号需要具有目标仓库的管理权限。在 Docker Home 的头像菜单进入 Account settings → Personal access tokens → Generate new token 创建，生成后将值保存到 GitHub 仓库的 `DOCKERHUB_TOKEN` Secret。权限范围和创建步骤见 [Docker Token 权限说明](https://docs.docker.com/security/access-tokens/reference/)与[个人令牌指南](https://docs.docker.com/security/access-tokens/personal-access-tokens/)。
+
 最终源码与镜像内容确认后，为该提交创建版本标签。在 release 分支手工运行 `Publish Docker image`，提供成功 Build 的 `build_run_id` 以及两个归档的 `amd64_config_digest`、`arm64_config_digest`。摘要采用 `sha256:` 格式，来自各归档实际配置文件。工作流核对 `master`、`release`、版本标签与构建提交相同，核对归档和装载后镜像身份，再上传这两个既有镜像。支持直接指向该提交的轻量标签或附注标签；标签缺失或指向其它提交时停止。
 
 发布先生成明确软件版本的多架构标签，例如 `nasaruntime/saga-server:1.0.0`，回读内容并更新仓库说明后，再使 `latest` 指向该版本。已有版本指向不同内容时拒绝覆盖，需要选择新的软件版本；镜像仓库无法读取或内容无法确认时停止。不会在发布阶段重建镜像替换已核对的归档。
