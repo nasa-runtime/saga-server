@@ -33,7 +33,7 @@ jobs:
         run: cargo +${{ matrix.toolchain }} package --locked
 
   image:
-    if: startsWith(github.ref, 'refs/heads/release/') && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/release' && github.event_name != 'pull_request'
     needs: build
     strategy:
       fail-fast: false

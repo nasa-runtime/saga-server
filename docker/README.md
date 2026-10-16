@@ -10,7 +10,7 @@ A standalone Saga orchestrator with workflow registration while the server stays
 - 平台：`linux/amd64`、`linux/arm64`；Alpine、musl，UID/GID `10001:10001`。
 - 持久存储：MySQL 或 PostgreSQL，数据库需要预先创建。
 - 许可证：MIT OR Apache-2.0。
-- [源码与完整配置](https://github.com/nasa-runtime/saga-server)、[Dockerfile](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/docker/Dockerfile)。
+- [源码与完整配置](https://github.com/nasa-runtime/saga-server)、[Dockerfile](https://github.com/nasa-runtime/saga-server/blob/release/docker/Dockerfile)。
 
 ## 运行架构与边界
 
@@ -24,13 +24,13 @@ Nacos、Consul 只负责入口定位。具名 `qualifier` 不跨环境回退，�
 
 流程拥有方发布包含 `workflow`、`definition_version` 和完整步骤合同的签名定义；各参与方登记可达能力并续租。动态 Catalog 持久化并同步这些事实，满足 `validated` 激活策略后，发起方携带 `saga_id` 和业务输入创建实例。定义名称与版本标识流程，`saga_id` 标识一次执行，服务端 YAML 不保存业务步骤清单或事务 ID。
 
-业务服务可独立部署新流程、新步骤及新定义版本，既有实例继续使用冻结的定义版本和摘要。新流程须沿用已授权的身份、租户、公钥和网络范围；新增信任范围仍需调整部署配置。定义未激活时不能创建实例，`/readyz` 成功不能替代指定流程的状态检查。接入顺序与权限见[动态流程接入](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/docs/integration.md#流程动态上报与服务端持续运行)。
+业务服务可独立部署新流程、新步骤及新定义版本，既有实例继续使用冻结的定义版本和摘要。新流程须沿用已授权的身份、租户、公钥和网络范围；新增信任范围仍需调整部署配置。定义未激活时不能创建实例，`/readyz` 成功不能替代指定流程的状态检查。接入顺序与权限见[动态流程接入](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md#流程动态上报与服务端持续运行)。
 
 ## 配置与启动
 
 主配置位于 `/app/zcf/application.yml`，导入 `${SAGA_YML:/etc/saga-server/*.yml}`。文件按自然名称顺序合并，后者覆盖前者，列表整体替换。缺少导入文件、凭据或必填配置时拒绝启动。配置变更需要重启，动态流程定义和能力租约独立同步。
 
-准备本地目录，将[授权模板](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/examples/config/10-security.yml)保存为 `deploy-local/config/10-security.yml`，按实际接入身份配置 caller、租户、参与方地址和凭据映射。Registry caller 必须声明允许的 workflow 范围。
+准备本地目录，将[授权模板](https://github.com/nasa-runtime/saga-server/blob/release/examples/config/10-security.yml)保存为 `deploy-local/config/10-security.yml`，按实际接入身份配置 caller、租户、参与方地址和凭据映射。Registry caller 必须声明允许的 workflow 范围。
 
 模板为可信定义管理方使用 `workflows: ["*"]`，允许其在显式授权的租户内管理新增流程，不逐个预置名称。此范围不按流程名称隔离，流程归属检查仍生效，仅适用于可信流程拥有方；身份认证、签名校验和网络白名单继续生效。新增不受信身份、公钥或网络范围仍需维护信任配置，具体流程和步骤由业务侧动态发布。
 
@@ -54,7 +54,7 @@ SAGA_WORKER_KEY=REPLACE_WITH_ANOTHER_64_LOWERCASE_HEX_CHARACTERS
 SAGA_DEFINITION_PUBLIC_KEY=REPLACE_WITH_BASE64_SPKI_ED25519_PUBLIC_KEY
 ```
 
-每个 HMAC 密钥分别使用 `openssl rand -hex 32` 生成。定义公钥为 Base64 编码的 SPKI DER，流程拥有方保管对应 PKCS8 DER 私钥，协调器只接收公钥。生成方法、权限和协议见[业务接入](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/docs/integration.md)。切换 PostgreSQL 时使用 `SAGA_DATABASE_DRIVER=postgresql` 和 `postgres://...` URL。运行账号需要组件初始化所需的 DDL 权限及持久表读写权限。
+每个 HMAC 密钥分别使用 `openssl rand -hex 32` 生成。定义公钥为 Base64 编码的 SPKI DER，流程拥有方保管对应 PKCS8 DER 私钥，协调器只接收公钥。生成方法、权限和协议见[业务接入](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。切换 PostgreSQL 时使用 `SAGA_DATABASE_DRIVER=postgresql` 和 `postgres://...` URL。运行账号需要组件初始化所需的 DDL 权限及持久表读写权限。
 
 ```sh
 chmod 600 deploy-local/saga.env
@@ -90,7 +90,7 @@ SAGA_REGISTER_PORT=12070
 
 对应端口映射改为 `192.168.10.20:12070:2070`。Nacos 使用 Nacos 3 HTTP API，不需要 SDK gRPC 端口。默认发布 `saga-server` 和 `saga-server-recovery`；Saga 身份及映射端点 metadata 由框架生成，不能用手工同名注册代替。
 
-`APP_PROFILE=multi-nacos` 向两套 Nacos 发布；`APP_PROFILE=consul` 使用固定 Consul agent 和 TTL 检查。Nacos/Consul 混合环境使用挂载配置。Kubernetes adapter 只读，部署方提供原生 Service 或受信代理入口。[完整多注册中心配置](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/docs/discovery.md)说明独立凭据、qualifier、映射端口和恢复通道。
+`APP_PROFILE=multi-nacos` 向两套 Nacos 发布；`APP_PROFILE=consul` 使用固定 Consul agent 和 TTL 检查。Nacos/Consul 混合环境使用挂载配置。Kubernetes adapter 只读，部署方提供原生 Service 或受信代理入口。[完整多注册中心配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/discovery.md)说明独立凭据、qualifier、映射端口和恢复通道。
 
 ## 调用、恢复与观测
 
@@ -98,13 +98,13 @@ SAGA_REGISTER_PORT=12070
 
 `/healthz` 表示存活，`/readyz` 表示业务就绪。能力失效时普通入口可被撤出，恢复路径仍需允许受信续租和结果回传；恢复地址不会绕过鉴权或业务门禁。停机先撤销资格与注册，再排空资源，停止宽限期应大于 60 秒。
 
-`9464/metrics` 提供 nafana 应用、Outbox 和发现指标，`2070/_nasa/saga/metrics` 提供持久 Saga 状态和生命周期分位数。只允许监控网络访问；多副本共享数据库指标按同一数据库去重，不能直接求和。当前阶段耗时直方图受预留容量限制，使用生命周期分位数并监控指标拒绝计数。[监控配置](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/docs/monitoring.md)包含 Prometheus、Grafana、告警和聚合语义。
+`9464/metrics` 提供 nafana 应用、Outbox 和发现指标，`2070/_nasa/saga/metrics` 提供持久 Saga 状态和生命周期分位数。只允许监控网络访问；多副本共享数据库指标按同一数据库去重，不能直接求和。当前阶段耗时直方图受预留容量限制，使用生命周期分位数并监控指标拒绝计数。[监控配置](https://github.com/nasa-runtime/saga-server/blob/release/docs/monitoring.md)包含 Prometheus、Grafana、告警和聚合语义。
 
-业务通信、配置与监控部署的完整说明：[中文](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/README.md)、[English](https://github.com/nasa-runtime/saga-server/blob/release/1.0.0/README.en.md)。
+业务通信、配置与监控部署的完整说明：[中文](https://github.com/nasa-runtime/saga-server/blob/release/README.md)、[English](https://github.com/nasa-runtime/saga-server/blob/release/README.en.md)。
 
 ## 源码构建与镜像发布
 
-维护分支为 `master`，发布分支为 `release/<Cargo.toml 中的软件版本>`，例如 `release/1.0.0`。Build 工作流在对应发布分支生成 `linux/amd64` 和 `linux/arm64` 镜像归档，不自动上传镜像。构建分支必须与 manifest 版本一致，归档保留 3 天；过期后需要重新构建。
+维护分支为 `master`，发布分支固定为 `release`。Git 版本标签与 `Cargo.toml` 中的软件版本一致，例如 `1.0.0`，不加 `v` 前缀。Build 工作流在 release 分支生成 `linux/amd64` 和 `linux/arm64` 镜像归档，不自动上传镜像。归档保留 3 天，过期后需要重新构建。
 
 GitHub Actions 使用以下仓库配置：
 
@@ -114,6 +114,6 @@ GitHub Actions 使用以下仓库配置：
 | Variable | `DOCKERHUB_NAMESPACE` | `nasaruntime`，与镜像名及文档一致 |
 | Secret | `DOCKERHUB_TOKEN` | 上述账号的访问凭据，不写入源码、环境样例或日志 |
 
-在对应发布分支手工运行 `Publish Docker image`，提供成功 Build 的 `build_run_id` 以及两个归档的 `amd64_config_digest`、`arm64_config_digest`。摘要采用 `sha256:` 格式，来自各归档实际配置文件。工作流核对 `master`、发布分支与构建提交相同，核对归档和装载后镜像身份，再上传这两个既有镜像。
+最终源码与镜像内容确认后，为该提交创建版本标签。在 release 分支手工运行 `Publish Docker image`，提供成功 Build 的 `build_run_id` 以及两个归档的 `amd64_config_digest`、`arm64_config_digest`。摘要采用 `sha256:` 格式，来自各归档实际配置文件。工作流核对 `master`、`release`、版本标签与构建提交相同，核对归档和装载后镜像身份，再上传这两个既有镜像。支持直接指向该提交的轻量标签或附注标签；标签缺失或指向其它提交时停止。
 
 发布先生成明确软件版本的多架构标签，例如 `nasaruntime/saga-server:1.0.0`，回读内容并更新仓库说明后，再使 `latest` 指向该版本。已有版本指向不同内容时拒绝覆盖，需要选择新的软件版本；镜像仓库无法读取或内容无法确认时停止。不会在发布阶段重建镜像替换已核对的归档。

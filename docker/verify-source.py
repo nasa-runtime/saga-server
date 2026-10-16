@@ -4,9 +4,9 @@ run_id = os.environ['BUILD_RUN_ID']
 with open('Cargo.toml', 'rb') as manifest:
     version = tomllib.load(manifest)['package']['version']
 assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), 'Stable version required'
-release_branch = f'release/{version}'
-# 发布只能消费对应软件版本分支的成功构建，不能借用其它分支或旧提交的产物。
-assert os.environ.get('GITHUB_REF') == f'refs/heads/{release_branch}', 'Release branch must match package version'
+release_branch = 'release'
+# 发布只能消费 release 分支的成功构建，不能借用其它分支或旧提交的产物。
+assert os.environ.get('GITHUB_REF') == f'refs/heads/{release_branch}', 'Release branch required'
 assert os.environ.get('GITHUB_ACTIONS') == 'true', 'GitHub Actions context required'
 assert re.fullmatch(r'[0-9]+', run_id), 'Invalid build run ID'
 for name in ['AMD64_CONFIG_DIGEST', 'ARM64_CONFIG_DIGEST']:
@@ -20,6 +20,11 @@ assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Build i
 for branch in ['master', release_branch]:
     ref = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/git/ref/heads/{branch}']))
     assert ref['object']['sha'] == sha, f'{branch} has a different revision'
+# 版本标签固定交付源码，不能将分支上的其它提交作为该软件版本上传。
+tag = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/git/ref/tags/{version}']))['object']
+if tag['type'] == 'tag':
+    tag = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/git/tags/{tag["sha"]}']))['object']
+assert tag['type'] == 'commit' and tag['sha'] == sha, 'Version tag must point to the published source'
 namespace = os.environ['HUB_NAMESPACE']
 assert re.fullmatch(r'[a-z0-9][a-z0-9_-]*', namespace), 'Invalid Docker Hub namespace'
 assert namespace == 'nasaruntime', 'Docker Hub documentation and namespace must agree'

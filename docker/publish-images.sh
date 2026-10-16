@@ -3,8 +3,8 @@ set -euo pipefail
 
 # 只有受控发布工作流可以上传；本地构建脚本没有发布权限。
 : "${IMAGE:?Missing image}" "${VERSION:?Missing version}" "${GITHUB_SHA:?Missing source revision}"
-# 上传前显式拒绝不匹配的工作流与版本分支，避免权限检查依赖 Shell 的隐式退出规则。
-if [[ "${GITHUB_ACTIONS:-}" != "true" || "${GITHUB_REF:-}" != "refs/heads/release/${VERSION}" ]]; then
+# 上传前显式拒绝不匹配的工作流与发布分支，避免权限检查依赖 Shell 的隐式退出规则。
+if [[ "${GITHUB_ACTIONS:-}" != "true" || "${GITHUB_REF:-}" != "refs/heads/release" ]]; then
   printf '%s\n' 'Matching release workflow required' >&2
   exit 1
 fi

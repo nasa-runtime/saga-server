@@ -18,7 +18,7 @@ bash docker/build-image.sh
 ```
 
 Docker 相关脚本和部署文件统一位于 `docker/`，工作流在 `.github/workflows/` 调用这些入口。
-维护分支使用 `master`，发布分支使用与 manifest 版本一致的 `release/<版本>`；镜像构建、仓库参数与上传约束见[镜像发布说明](docker/README.md#源码构建与镜像发布)。
+维护分支使用 `master`，发布分支固定为 `release`；Git 版本标签与 manifest 软件版本一致，例如 `1.0.0`。镜像构建、仓库参数与上传约束见[镜像发布说明](docker/README.md#源码构建与镜像发布)。
 
 镜像脚本使用服务目录中的源码和锁文件，构建环境须能取得对应的 registry 依赖；`SAGA_IMAGE` 可覆盖镜像标签。
 

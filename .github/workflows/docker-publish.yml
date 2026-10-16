@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: Successful Build run from release/<package version> containing the image archives
+        description: Successful Build run from release containing the image archives
         required: true
         type: string
       amd64_config_digest:
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   publish:
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: github.ref == 'refs/heads/release'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
