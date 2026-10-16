@@ -21,6 +21,8 @@ jobs:
         run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
       - name: Format
         run: cargo +${{ matrix.toolchain }} fmt --all --check
+      - name: Repository overview contract
+        run: python3 docker/check-overview.py
       - name: Lint
         run: cargo +${{ matrix.toolchain }} clippy --all-targets --locked -- -D warnings
       - name: Build

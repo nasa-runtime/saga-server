@@ -1,0 +1,65 @@
+name: Update Docker repository metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      documentation_run_id:
+        description: Successful release Build for the current documentation commit
+        required: true
+        type: string
+      build_run_id:
+        description: Successful release Build for the existing version tag
+        required: true
+        type: string
+      amd64_config_digest:
+        description: Existing verified amd64 config digest
+        required: true
+        type: string
+      arm64_config_digest:
+        description: Existing verified arm64 config digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dockerhub-saga-server
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCUMENTATION_RUN_ID: ${{ inputs.documentation_run_id }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      AMD64_CONFIG_DIGEST: ${{ inputs.amd64_config_digest }}
+      ARM64_CONFIG_DIGEST: ${{ inputs.arm64_config_digest }}
+      HUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'nasaruntime' }}
+      REQUIRE_VERSION_PRESENT: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify documentation and existing image source
+        run: python3 docker/verify-metadata.py
+      - name: Verify existing version contents
+        run: python3 docker/registry-check.py
+      - name: Publish repository overview
+        env:
+          HUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: python3 docker/publish-overview.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Update latest to the verified version
+        run: bash docker/publish-latest.sh
+      - name: Verify latest contents
+        env:
+          VERIFY_LATEST: 'true'
+        run: python3 docker/registry-check.py

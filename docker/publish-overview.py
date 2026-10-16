@@ -1,4 +1,4 @@
-import json, os, urllib.request
+import json, os, urllib.error, urllib.request
 from pathlib import Path
 # 镜像版本内容确认后才更新公开说明，避免说明指向尚未确认的镜像。
 assert os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_REF') == 'refs/heads/release', 'Release workflow required'
@@ -8,11 +8,19 @@ with urllib.request.urlopen(request, timeout=30) as response:
     token = json.load(response)['access_token']
 print(f'::add-mask::{token}')
 overview = Path('docker/README.md').read_text()
-description = '独立 Saga 协调服务：新增流程无需重启，支持多注册中心接入、数据库持久恢复、幂等与补偿。'
+assert len(overview.encode('utf-8')) <= 25000, 'Repository overview exceeds its UTF-8 budget'
+description = 'Saga 协调服务：新增流程无需重启，多注册中心、持久恢复、幂等与补偿。'
+assert len(description.encode('utf-8')) <= 100, 'Repository summary exceeds its UTF-8 budget'
 url = f'https://hub.docker.com/v2/repositories/{os.environ["IMAGE"]}/'
 request = urllib.request.Request(url, data=json.dumps({'description': description, 'full_description': overview}).encode(), headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}, method='PATCH')
-with urllib.request.urlopen(request, timeout=30):
-    pass
+try:
+    with urllib.request.urlopen(request, timeout=30):
+        pass
+except urllib.error.HTTPError as error:
+    # 仓库说明属于公开内容；保留字段校验原因，并移除可能回显的认证材料。
+    detail = error.read(4096).decode('utf-8', errors='replace')
+    detail = detail.replace(token, '[redacted]').replace(os.environ['HUB_TOKEN'], '[redacted]')
+    raise SystemExit(f'Repository overview rejected: HTTP {error.code}: {detail}')
 request = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
 with urllib.request.urlopen(request, timeout=30) as response:
     result = json.load(response)

@@ -12,4 +12,4 @@ fi
 docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
 docker buildx imagetools inspect "${IMAGE}:${VERSION}"
 docker buildx imagetools inspect "${IMAGE}:latest"
-printf 'Image: %s:%s\nSource: %s\n' "$IMAGE" "$VERSION" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+printf 'Image: %s:%s\nSource: %s\n' "$IMAGE" "$VERSION" "${IMAGE_SOURCE_REVISION:-$GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"

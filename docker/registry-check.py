@@ -19,6 +19,7 @@ def manifest(reference):
             return None
         raise SystemExit(f'Registry preflight failed: HTTP {error.code}')
 expected = {arch: os.environ[f'{arch.upper()}_CONFIG_DIGEST'] for arch in ['amd64', 'arm64']}
+source_revision = os.environ.get('IMAGE_SOURCE_REVISION', os.environ['GITHUB_SHA'])
 version = manifest(os.environ['VERSION'])
 if os.environ.get('REQUIRE_VERSION_PRESENT') == 'true':
     assert version is not None, 'Published version is missing'
@@ -30,7 +31,7 @@ if version is not None:
         arch = entry['platform']['architecture']
         assert manifest(entry['digest'])['config']['digest'] == expected[arch], 'Existing version content differs; choose a new version'
 for arch in expected:
-    existing = manifest(f'sha-{os.environ["GITHUB_SHA"]}-{arch}')
+    existing = manifest(f'sha-{source_revision}-{arch}')
     assert existing is None or existing['config']['digest'] == expected[arch], 'Existing architecture image differs'
 if os.environ.get('VERIFY_LATEST') == 'true':
     # latest 只能引用已确认的版本平台清单，不能把其它构建混入默认入口。
