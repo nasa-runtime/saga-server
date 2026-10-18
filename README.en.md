@@ -35,7 +35,7 @@ The template uses `workflows: ["*"]` for a trusted owner within explicitly autho
 
 ## Prepare configuration
 
-Run repository commands from its root directory. Container-only operators can download the required files using the [Docker Hub guide](docker/README.md) without installing Rust.
+Keep `compose.yml`, `application.yml` and `.env` together in one deployment directory. With a source checkout, use its root directory and copy the three templates below; existing deployments must keep their own files. Container-only operators can download the required files using the [Docker Hub guide](docker/README.md) without installing Rust.
 
 ```sh
 git clone --branch release https://github.com/nasa-runtime/saga-server.git
@@ -45,13 +45,16 @@ cd saga-server
 The image loads `/app/zcf/application.yml` and imports `${SAGA_YML:/etc/saga-server/*.yml}`. Files in each glob are merged in natural filename order; later files override earlier files and lists are replaced. Missing required imports or credentials prevent startup. Local configuration is loaded at startup and changes require a restart; the dynamic workflow catalog and participant leases are synchronized separately.
 
 ```sh
-mkdir -p deploy-local/config
-cp examples/config/10-security.yml deploy-local/config/
+cp docker/compose.yml compose.yml
+cp docker/env.example .env
+cp examples/config/10-security.yml application.yml
+chmod 600 .env
+chmod 644 application.yml
 ```
 
 Update the sample tenant `system`, callers `order-api`/`order-worker`, signing key mapping and participant address allowlist to match your deployment. Each result producer needs its own `producer_credentials` entry. The template grants the trusted definition owner `workflows: ["*"]` within its explicit tenants, allowing new workflow names without server configuration changes. This scope does not restrict workflow names; definition ownership checks still apply. Grant it only to trusted workflow owners.
 
-Create `deploy-local/saga.env` with real values:
+Fill the copied `.env` with real values:
 
 ```dotenv
 SAGA_DATABASE_DRIVER=mysql
@@ -73,10 +76,10 @@ Generate independent HMAC keys with `openssl rand -hex 32`. The page token key m
 
 ```sh
 umask 077
-openssl genpkey -algorithm ED25519 -out deploy-local/definition-private.pem
-openssl pkey -in deploy-local/definition-private.pem -pubout -outform DER -out deploy-local/definition-public.der
-openssl base64 -A -in deploy-local/definition-public.der
-chmod 600 deploy-local/saga.env
+openssl genpkey -algorithm ED25519 -out definition-private.pem
+openssl pkey -in definition-private.pem -pubout -outform DER -out definition-public.der
+openssl base64 -A -in definition-public.der
+chmod 600 .env
 ```
 
 Use the public key output as `SAGA_DEFINITION_PUBLIC_KEY`. Keep credentials outside version control. The database must already exist. The application account needs the DML and schema creation/validation privileges required by the managed components. Use a dedicated account and database. To use PostgreSQL:
@@ -85,6 +88,23 @@ Use the public key output as `SAGA_DEFINITION_PUBLIC_KEY`. Keep credentials outs
 SAGA_DATABASE_DRIVER=postgresql
 SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:5432/saga_control
 ```
+
+## Start with Docker Compose
+
+For a new MySQL database, complete the [audit trigger initialization](docker/README.md#mysql-首次初始化与触发器权限) before starting with the regular runtime account.
+
+The copied [Compose template](docker/compose.yml) uses the adjacent `application.yml` and `.env`, and connects to your existing database. Choose this or the alternative `docker run` deployment; do not start both on host port 2070 or with the same replica identity.
+
+Use Docker Compose 2.30.0 or newer. Write `.env` as `KEY=value`, without wrapping quotes or inline comments. The template uses `raw` format so credential values reach the container unchanged, matching `docker run --env-file`. A deployment platform can inject the environment directly without an environment file.
+
+```sh
+docker compose up -d
+docker compose ps
+docker compose logs --tail 100 saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+Use `docker compose stop` only for planned maintenance or upgrades. Restart with the original database, replica identity and trust configuration. New business workflows do not require stopping the coordinator. The monitoring Compose below already includes the coordinator, so choose that stack directly when monitoring is needed.
 
 ## Run with Docker
 
@@ -97,33 +117,19 @@ docker run -d --name saga-server \
   --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   --stop-timeout 70 \
-  --env-file ./deploy-local/saga.env \
-  --mount type=bind,src="$(pwd)/deploy-local/config",dst=/etc/saga-server,readonly \
+  --env-file ./.env \
+  --mount type=bind,src="$(pwd)/application.yml",dst=/etc/saga-server/application.yml,readonly \
   --publish 127.0.0.1:2070:2070 \
   "$SAGA_IMAGE"
 curl --fail http://127.0.0.1:2070/healthz
 curl --fail http://127.0.0.1:2070/readyz
 ```
 
-The Alpine image runs as UID/GID `10001:10001`. The environment file above explicitly sets `SAGA_LOG_PATH` to an empty value for console logging and a read only root filesystem. When the variable is unset, file logging defaults to `/usr/local/logs/${application.name}` and requires a directory writable by that UID. `SAGA_LOG_LEVEL` defaults to `info`. The config directory must be readable by UID 10001.
+The Alpine image runs as UID/GID `10001:10001`. The environment file above explicitly sets `SAGA_LOG_PATH` to an empty value for console logging and a read only root filesystem. When the variable is unset, file logging defaults to `/usr/local/logs/${application.name}` and requires a directory writable by that UID. `SAGA_LOG_LEVEL` defaults to `info`. The application YAML must be readable by UID 10001. Mount only that file; mounting the deployment directory would also import the Compose YAML. The environment file and private key are not mounted.
 
 Registry connections are disabled by default. Call the HTTP API at `http://saga-server:2070/_nasa/saga` on a shared Docker network, or at the host's reachable mapped address. The example's loopback publication is host local; bind a specific private host IP for remote clients. Container `localhost` is the container itself: database and participant endpoints must be reachable from the container.
 
 `SAGA_YML` changes the import path. `APP__SERVER__PORT` changes the listener; update Docker's health check, port mapping and Prometheus targets together. The embedded health check uses `2070/readyz`. `/healthz` is liveness; `/readyz` is business readiness. Startup and shutdown budgets are 60 seconds, so use a longer container stop timeout.
-
-### Docker Compose
-
-The [base Compose file](docker/compose.yml) uses the same configuration directory and environment file, and connects to your existing database. Choose this or the preceding `docker run` deployment; do not start both on host port 2070 or with the same replica identity.
-
-```sh
-docker compose -p saga -f docker/compose.yml pull
-docker compose -p saga -f docker/compose.yml up -d
-docker compose -p saga -f docker/compose.yml ps
-docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
-curl --fail http://127.0.0.1:2070/readyz
-```
-
-Use `docker compose -p saga -f docker/compose.yml stop` only for planned maintenance or upgrades. Restart with the original database, replica identity and trust configuration. New business workflows do not require stopping the coordinator. The monitoring Compose below already includes the coordinator, so choose that stack directly when monitoring is needed.
 
 ## Start and query a Saga
 
@@ -146,13 +152,13 @@ After confirming activation, switch to `order-api` and enter its `SAGA_CLIENT_KE
 export SAGA_HTTP_PRODUCER=order-api
 read -r -s SAGA_HTTP_KEY
 export SAGA_HTTP_KEY
-cat > deploy-local/order.json <<'JSON'
+cat > order.json <<'JSON'
 {"order_id":"order-1001","quantity":1}
 JSON
 python3 examples/saga-http.py start \
   --tenant system --workflow order_checkout --definition-version 1 \
   --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
-  --input-file deploy-local/order.json
+  --input-file order.json
 python3 examples/saga-http.py get --tenant system --saga-id order-1001
 unset SAGA_HTTP_KEY
 ```
@@ -386,7 +392,7 @@ registration. Local eligibility and confirmed remote registration are separate o
 dashboard and alerts cover Saga, Outbox and scrape status; add per-registration views in your monitoring
 platform as described in the [discovery metrics guide](docs/monitoring.md#发现连接与注册目标).
 
-With `deploy-local/config` and `deploy-local/saga.env` ready:
+With root-level `application.yml` and `.env` ready:
 
 This stack already includes the coordinator. Choose it instead of the standalone container or base Compose deployment to avoid port and replica identity conflicts.
 

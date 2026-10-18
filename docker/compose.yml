@@ -6,11 +6,20 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 70s
-    env_file: ../deploy-local/saga.env
+    # 凭据按原文注入，使 $、引号等内容与 docker run --env-file 的语义一致。
+    env_file:
+      - path: ./.env
+        format: raw
     ports:
       - "127.0.0.1:2070:2070"
     volumes:
-      - ../deploy-local/config:/etc/saga-server:ro
+      # 只导入业务配置，避免把同目录的 Compose 文件和凭据文件挂入应用。
+      - type: bind
+        source: ./application.yml
+        target: /etc/saga-server/application.yml
+        read_only: true
+        bind:
+          create_host_path: false
     logging:
       driver: json-file
       options:

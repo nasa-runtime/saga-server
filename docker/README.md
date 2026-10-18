@@ -16,24 +16,36 @@ Nacos/Consul 负责定位，不复制 Saga 数据或提供租户授权；具名 
 
 流程拥有方发布含 `workflow`、`definition_version` 和步骤合同的签名定义，参与方登记能力并续租；满足 `validated` 策略后，发起方携带 `saga_id` 创建实例。既有实例使用冻结的定义版本与摘要。YAML 只管理基础设施、运行策略与信任范围。
 
-新增流程必须沿用已授权的身份、租户、公钥和网络；新增信任范围仍需调整部署配置。定义未激活时不能创建实例，Ready 不代表指定流程已激活。[业务接入协议](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)说明发布、激活、调用和授权。
+新流程沿用已授权身份、公钥和网络；新增信任范围需调整部署配置。定义未激活不能创建实例，Ready 不代表流程已激活。[业务接入协议](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。
 
 ## 配置与启动
 
-以下命令使用 Bash，先替换所有地址和凭据占位值。首次使用 MySQL 先完成[触发器初始化](#mysql-首次初始化与触发器权限)。各启动模式择一，避免重复身份和端口冲突。
+使用 Docker Compose 2.30.0 或更新版本，一个部署目录放三个文件即可，无需安装 Rust、克隆源码或额外建立配置子目录：
 
-主配置导入 `${SAGA_YML:/etc/saga-server/*.yml}`；文件按名称合并，后者覆盖前者，列表整体替换。缺少导入文件或必填配置时拒绝启动。本地配置变更需重启，动态定义与能力同步独立进行。
-
-下载授权模板，填写 caller、租户、参与方网络及凭据。`workflows: ["*"]` 仅适用于可信流程拥有方，定义归属、签名和网络白名单仍生效；精确名称列表仅授权列出的流程。
-
-```sh
-mkdir -p deploy-local/config
-curl --fail --location \
-  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/config/10-security.yml \
-  --output deploy-local/config/10-security.yml
+```text
+saga-server/
+├── compose.yml       # 容器启动配置
+├── application.yml   # 调用身份、租户、权限和参与方地址
+└── .env              # 数据库连接、密钥和可选注册中心参数
 ```
 
-保存为 `deploy-local/saga.env`，不设置 `APP_PROFILE`，不要提交到仓库：
+### 1. 下载文件
+
+在新目录执行，已有部署不要覆盖原配置：
+
+```sh
+mkdir saga-server
+cd saga-server
+curl --fail --location https://raw.githubusercontent.com/nasa-runtime/saga-server/release/docker/compose.yml --output compose.yml
+curl --fail --location https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/config/10-security.yml --output application.yml
+curl --fail --location https://raw.githubusercontent.com/nasa-runtime/saga-server/release/docker/env.example --output .env
+chmod 600 .env
+chmod 644 application.yml
+```
+
+### 2. 填写配置
+
+编辑 `.env`，填入已有数据库、稳定的副本身份、五个独立 HMAC 密钥及定义签名公钥。模板默认 MySQL；使用 PostgreSQL 只替换 `SAGA_DATABASE_DRIVER=postgresql` 和对应连接 URL。首次使用 MySQL 先完成[触发器初始化](#mysql-首次初始化与触发器权限)。数据库密码中的特殊字符须 URL 编码。
 
 ```dotenv
 SAGA_DATABASE_DRIVER=mysql
@@ -49,65 +61,56 @@ SAGA_WORKER_KEY=REPLACE_WITH_ANOTHER_64_LOWERCASE_HEX_CHARACTERS
 SAGA_DEFINITION_PUBLIC_KEY=REPLACE_WITH_BASE64_SPKI_ED25519_PUBLIC_KEY
 ```
 
-每个 HMAC 密钥分别用 `openssl rand -hex 32` 生成。定义公钥使用 Base64 SPKI DER，以下最后一条输出填入 `SAGA_DEFINITION_PUBLIC_KEY`；私钥只由流程拥有方保管，不挂载给协调器：
+每个 HMAC 密钥分别用 `openssl rand -hex 32` 生成。定义公钥使用 Base64 SPKI DER；以下最后一条输出填入 `SAGA_DEFINITION_PUBLIC_KEY`，私钥只由流程拥有方保管：
 
 ```sh
 umask 077
-openssl genpkey -algorithm ED25519 -out deploy-local/definition-private.pem
-openssl pkey -in deploy-local/definition-private.pem -pubout -outform DER -out deploy-local/definition-public.der
-openssl base64 -A -in deploy-local/definition-public.der
+openssl genpkey -algorithm ED25519 -out definition-private.pem
+openssl pkey -in definition-private.pem -pubout -outform DER -out definition-public.der
+openssl base64 -A -in definition-public.der
 ```
 
-参与方需要 PKCS8 DER 时，执行 `openssl pkcs8 -topk8 -nocrypt -in deploy-local/definition-private.pem -outform DER -out deploy-local/definition-private.der`，再用 `openssl base64 -A -in deploy-local/definition-private.der` 编码，仅交给流程拥有方。
+需要 PKCS8 DER 私钥时执行 `openssl pkcs8 -topk8 -nocrypt -in definition-private.pem -outform DER -out definition-private.der`，再用 `openssl base64 -A -in definition-private.der` 编码，仅交给流程拥有方。
 
-已有 PostgreSQL 库可在基础环境文件替换下面两项；数据库与注册中心选择相互独立：
+编辑 `application.yml`，将示例 `system`、`order-api`、`order-worker` 和参与方地址换成实际值。`workflows: ["*"]` 仅授予可信流程拥有方，定义归属、签名和网络白名单仍生效。没有这些业务身份与密钥时，服务不能安全接入参与方。
 
-```dotenv
-SAGA_DATABASE_DRIVER=postgresql
-SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:5432/saga_control
-```
+`.env` 每行使用 `KEY=value`，不加包裹引号或行尾注释。Compose 使用 `env_file` 的 `raw` 格式原样注入值，只挂载 `application.yml`。不要挂载整个部署目录，以免把 `compose.yml` 当业务配置读取。服务也可直接接收平台注入的环境变量，不强制使用 `.env` 文件。[环境文件规则](https://docs.docker.com/reference/compose-file/services/#env_file)。
 
-固定 HTTP 模式启动：
+### 3. 启动
 
 ```sh
-chmod 600 deploy-local/saga.env
+docker compose up -d
+docker compose logs --tail 100 saga-server
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+默认固定 HTTP 寻址，不需要 Nacos。容器内 `localhost` 指向自身，数据库和参与方使用容器可达地址。端口默认仅绑定 `127.0.0.1`，跨主机调用时在 `compose.yml` 修改为受控内网 IP。
+
+`SAGA_LOG_PATH=` 表示控制台日志；配置文件需允许 UID 10001 读取。主配置导入 `${SAGA_YML:/etc/saga-server/*.yml}`，本方案只挂载一份业务文件；缺少必填配置时拒绝启动。基础设施与信任配置变更需计划重启，新增已授权业务流程无需修改这些文件。
+
+### 使用 docker run
+
+与 Compose 二选一，复用同目录的 `.env`、`application.yml`。下方其它场景命令也从此部署目录执行，先设置镜像变量：
+
+```sh
 export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
 docker pull "$SAGA_IMAGE"
 docker run --detach --name saga-server \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-  --env-file ./deploy-local/saga.env \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 127.0.0.1:2070:2070 \
   "$SAGA_IMAGE"
-curl --fail http://127.0.0.1:2070/healthz
 curl --fail http://127.0.0.1:2070/readyz
 ```
-
-`SAGA_LOG_PATH=` 仅输出控制台；未设置时默认 `/usr/local/logs/${application.name}`，需要可写挂载。配置必须允许 UID 10001 读取。容器内 `localhost` 指向自身，数据库和参与方应使用容器可达地址。上例仅允许宿主机访问，跨主机使用受控内网 IP 与防火墙。
-
-### 使用 Docker Compose
-
-复用上述目录并连接已有数据库，与 `docker run` 二选一：
-
-```sh
-mkdir -p docker
-curl --fail --location \
-  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/docker/compose.yml \
-  --output docker/compose.yml
-docker compose -p saga -f docker/compose.yml pull
-docker compose -p saga -f docker/compose.yml up -d
-docker compose -p saga -f docker/compose.yml ps
-docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
-curl --fail http://127.0.0.1:2070/readyz
-```
-
-只在计划维护时停止协调器；保留数据库、密钥、服务和副本身份。新增流程不停止服务。
 
 ## Nacos、Consul 与多注册中心
 
-默认关闭 discovery。单 Nacos 将下列变量保存为独立的 `deploy-local/nacos.env`，基础文件仍使用 `saga.env`，授权目录不混入其它发现配置：
+继续使用 Compose 时，填写下列 `.env` 参数，并在 `compose.yml` 的 `ports` 中设置对应映射，再执行 `docker compose up -d`。单套示例映射为 `192.168.10.20:12070:2070`，双套再增加 `192.168.20.20:22070:2070`；发布地址必须能从调用方到达。下方同时给出完整 `docker run` 命令，两种方式择一。
+
+默认关闭 discovery。使用单 Nacos 时，在同一个 `.env` 中增加以下变量，每个变量只保留一行：
 
 ```dotenv
 APP_PROFILE=nacos
@@ -125,9 +128,8 @@ docker run --detach --name saga-nacos \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-  --env-file ./deploy-local/saga.env \
-  --env-file ./deploy-local/nacos.env \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 192.168.10.20:12070:2070 \
   "$SAGA_IMAGE"
 docker logs --tail 100 saga-nacos
@@ -137,7 +139,7 @@ curl --fail http://192.168.10.20:12070/discovery/eligible/primary-recovery
 
 使用 Nacos 3 HTTP API，无需 SDK gRPC 端口。默认发布 `saga-server` 与 `saga-server-recovery`，Saga 身份和映射 metadata 由框架生成，不能用手工同名记录代替。
 
-双 Nacos 保留 `nacos.env`，将以下内容保存为 `deploy-local/secondary.env`，后加载的 profile 生效：
+双 Nacos 在同一个 `.env` 中把 `APP_PROFILE` 改成 `multi-nacos`，保留第一套 Nacos 变量，再增加第二套：
 
 ```dotenv
 APP_PROFILE=multi-nacos
@@ -155,10 +157,8 @@ docker run --detach --name saga-multi-nacos \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-  --env-file ./deploy-local/saga.env \
-  --env-file ./deploy-local/nacos.env \
-  --env-file ./deploy-local/secondary.env \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 192.168.10.20:12070:2070 \
   --publish 192.168.20.20:22070:2070 \
   "$SAGA_IMAGE"
@@ -170,7 +170,7 @@ curl --fail http://192.168.20.20:22070/discovery/eligible/secondary-recovery
 
 两条映射进入同一容器 listener，连接名分别为 `primary`、`secondary`，共享数据库事实。映射 IP 必须属于宿主机或由受信网关提供。相同 Nacos 地址的不同 namespace/group 也使用此模式，目标不能覆盖同一记录。
 
-单 Consul 保存为 `deploy-local/consul.env`；agent 地址固定到管理本副本记录的 agent：
+单 Consul 在同一个 `.env` 中替换 `APP_PROFILE` 并填写以下变量；agent 地址固定到管理本副本记录的 agent：
 
 ```dotenv
 APP_PROFILE=consul
@@ -187,9 +187,8 @@ docker run --detach --name saga-consul \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-  --env-file ./deploy-local/saga.env \
-  --env-file ./deploy-local/consul.env \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 192.168.10.20:12070:2070 \
   "$SAGA_IMAGE"
 docker logs --tail 100 saga-consul
@@ -231,39 +230,39 @@ mysql --host=mysql.internal --port=3306 --user=db_admin --password \
   --execute='SELECT @@log_bin, @@log_bin_trust_function_creators;'
 ```
 
-该策略下，用有权创建触发器的稳定模式管理账号初始化空库，再切换 `saga_user`。以下仅用于首次部署、尚无流量和其它协调副本；基础环境文件不设 profile，配置目录只含授权及运行策略。先完成镜像拉取、配置和密钥准备：
+该策略下，用有权创建触发器的稳定模式管理账号初始化空库，再切换 `saga_user`。以下仅用于首次部署、尚无流量和其它协调副本；`.env` 不设 profile，`application.yml` 只含授权及运行策略。先准备密钥和配置，并执行 `export SAGA_IMAGE=nasaruntime/saga-server:1.0.0`：
 
 ```sh
 umask 077
-cat > deploy-local/mysql-bootstrap.env <<'ENV'
+cat > mysql-bootstrap.env <<'ENV'
 SAGA_DATABASE_DRIVER=mysql
 SAGA_DATABASE_URL=mysql://schema_admin:URL_ENCODED_PASSWORD@mysql.internal:3306/saga_control
 ENV
-chmod 600 deploy-local/mysql-bootstrap.env
+chmod 600 mysql-bootstrap.env
 (
   set -e
   docker run --detach --name saga-schema-init \
     --stop-timeout 70 --read-only --cap-drop ALL --security-opt no-new-privileges \
-    --env-file ./deploy-local/saga.env --env-file ./deploy-local/mysql-bootstrap.env \
+    --env-file ./.env --env-file ./mysql-bootstrap.env \
     --env SAGA_REPLICA_ID=saga-schema-init \
-    --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+    --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
     --publish 127.0.0.1:12079:2070 \
     "$SAGA_IMAGE"
   curl --fail --retry 60 --retry-connrefused --retry-delay 1 --retry-max-time 120 \
     --max-time 2 http://127.0.0.1:12079/readyz
   docker stop --time 70 saga-schema-init
   docker rm saga-schema-init
-  rm deploy-local/mysql-bootstrap.env
+  rm mysql-bootstrap.env
 )
 ```
 
-初始化容器是完整协调进程，Ready 后需显式停止。失败时检查 `docker logs saga-schema-init` 并由 DBA 处理，不绕过 schema 门禁。保留触发器 `DEFINER` 对应数据库账号及所需表权限；仅删除临时环境文件。正式容器继续使用 `saga.env` 中的单库账号。
+初始化容器是完整协调进程，Ready 后需显式停止。失败时检查 `docker logs saga-schema-init` 并由 DBA 处理，不绕过 schema 门禁。保留触发器 `DEFINER` 对应数据库账号及所需表权限；仅删除临时环境文件。正式容器继续使用 `.env` 中的单库账号。
 
 已有集群升级由 DBA 按维护流程处理结构，不重复套用首次初始化命令。数据库平台也可由 DBA 管理允许触发器创建的参数策略；应用不自动改变全局设置。[MySQL 权限规则](https://dev.mysql.com/doc/refman/8.4/en/stored-programs-logging.html)。
 
 ### PostgreSQL 与固定 HTTP 入口
 
-下列内容保存为 `deploy-local/postgres.env`；基础文件保留密钥与身份，不设置 profile：
+在同一个 `.env` 中替换以下两项；固定 HTTP 模式不设置 `APP_PROFILE`：
 
 ```dotenv
 SAGA_DATABASE_DRIVER=postgresql
@@ -274,8 +273,8 @@ SAGA_DATABASE_URL=postgres://saga_user:URL_ENCODED_PASSWORD@postgres.internal:54
 docker run --detach --name saga-postgres \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env-file ./deploy-local/postgres.env \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 127.0.0.1:2070:2070 \
   "$SAGA_IMAGE"
 curl --fail http://127.0.0.1:2070/healthz
@@ -283,28 +282,19 @@ curl --fail http://127.0.0.1:2070/readyz
 docker logs --tail 100 saga-postgres
 ```
 
-PostgreSQL 配合 Nacos/Consul 时，在相应启动命令的其它环境文件之后追加 `--env-file ./deploy-local/postgres.env`。同一集群所有副本连接同一协调库。
+PostgreSQL 配合 Nacos/Consul 时，在同一个 `.env` 中保留对应注册中心参数即可。同一集群所有副本连接同一协调库。
 
 ### Nacos 与 Consul 混合发布
 
-填写前述 `nacos.env` 与 `consul.env`，使用独立配置目录，移除两份文件中的 profile 后合并变量；基础文件不设 profile：
+在同一个 `.env` 中填写两套 Nacos/Consul 地址、凭据和发布端点，删除 `APP_PROFILE`。将[混合配置](https://github.com/nasa-runtime/saga-server/blob/release/examples/config/discovery-mixed.yml)中的整个 `discovery` 段合并到 `application.yml`，保留已有 `secrets` 和 `saga`；已有 `discovery` 时整体替换，不能出现重复根键。配置仍只有一份 `.env` 和一份业务 YAML。
 
 ```sh
-mkdir -p deploy-local/mixed-config
-cp deploy-local/config/10-security.yml deploy-local/mixed-config/10-security.yml
-curl --fail --location \
-  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/config/discovery-mixed.yml \
-  --output deploy-local/mixed-config/30-discovery.yml
-umask 077
-grep -v '^APP_PROFILE=' deploy-local/nacos.env > deploy-local/mixed.env
-grep -v '^APP_PROFILE=' deploy-local/consul.env >> deploy-local/mixed.env
-chmod 600 deploy-local/mixed.env
 docker run --detach --name saga-mixed \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env-file ./deploy-local/mixed.env \
+  --env-file ./.env \
   --env SECONDARY_REGISTER_IP=192.168.20.20 --env SECONDARY_REGISTER_PORT=22070 \
-  --mount "type=bind,src=$PWD/deploy-local/mixed-config,dst=/etc/saga-server,readonly" \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 192.168.10.20:12070:2070 --publish 192.168.20.20:22070:2070 \
   "$SAGA_IMAGE"
 curl --fail http://192.168.10.20:12070/readyz
@@ -323,15 +313,15 @@ docker logs --tail 100 saga-mixed
 docker run --detach --name saga-server-0 \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env SAGA_REPLICA_ID=saga-server-0 \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env --env SAGA_REPLICA_ID=saga-server-0 \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 127.0.0.1:12070:2070 \
   "$SAGA_IMAGE"
 docker run --detach --name saga-server-1 \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env SAGA_REPLICA_ID=saga-server-1 \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env --env SAGA_REPLICA_ID=saga-server-1 \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 127.0.0.1:12071:2070 \
   "$SAGA_IMAGE"
 curl --fail http://127.0.0.1:12070/readyz
@@ -349,8 +339,8 @@ docker stats --no-stream saga-server-0 saga-server-1
 docker run --detach --name saga-custom-port \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env APP__SERVER__PORT=2080 \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
+  --env-file ./.env --env APP__SERVER__PORT=2080 \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
   --publish 127.0.0.1:12080:2080 --publish 127.0.0.1:9464:9464 \
   --health-cmd='wget -q -O /dev/null http://127.0.0.1:2080/readyz || exit 1' \
   "$SAGA_IMAGE"
@@ -362,13 +352,13 @@ curl --fail http://127.0.0.1:9464/metrics
 文件日志与控制台模式择一；以下授权命令用于 Linux 宿主机，Docker Desktop 还需符合文件共享授权：
 
 ```sh
-sudo install -d -o 10001 -g 10001 -m 0750 deploy-local/logs
+sudo install -d -o 10001 -g 10001 -m 0750 logs
 docker run --detach --name saga-file-log \
   --restart unless-stopped --stop-timeout 70 \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./deploy-local/saga.env --env SAGA_LOG_PATH=/var/log/saga-server \
-  --mount "type=bind,src=$PWD/deploy-local/config,dst=/etc/saga-server,readonly" \
-  --mount "type=bind,src=$PWD/deploy-local/logs,dst=/var/log/saga-server" \
+  --env-file ./.env --env SAGA_LOG_PATH=/var/log/saga-server \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
+  --mount "type=bind,src=$PWD/logs,dst=/var/log/saga-server" \
   --publish 127.0.0.1:2070:2070 \
   "$SAGA_IMAGE"
 curl --fail http://127.0.0.1:2070/readyz
@@ -410,10 +400,10 @@ docker rm saga-server
 Compose 在相同维护条件下更新指定服务：
 
 ```sh
-docker compose -p saga -f docker/compose.yml pull saga-server
-docker compose -p saga -f docker/compose.yml up -d --no-deps saga-server
-docker compose -p saga -f docker/compose.yml ps
-docker compose -p saga -f docker/compose.yml logs --tail 100 saga-server
+docker compose pull saga-server
+docker compose up -d --no-deps saga-server
+docker compose ps
+docker compose logs --tail 100 saga-server
 ```
 
 监控 Compose 使用 `saga-monitoring` 和 `docker/monitoring/compose.yml`，仅更新协调服务并保留监控数据卷。
@@ -443,13 +433,13 @@ python3 examples/saga-http.py definition \
 export SAGA_HTTP_PRODUCER=order-api
 read -r -s SAGA_HTTP_KEY
 export SAGA_HTTP_KEY
-cat > deploy-local/order.json <<'JSON'
+cat > order.json <<'JSON'
 {"order_id":"order-1001","quantity":1}
 JSON
 python3 examples/saga-http.py start \
   --tenant system --workflow order_checkout --definition-version 1 \
   --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
-  --input-file deploy-local/order.json
+  --input-file order.json
 python3 examples/saga-http.py get --tenant system --saga-id order-1001
 unset SAGA_HTTP_KEY
 ```
@@ -470,11 +460,12 @@ unset SAGA_HTTP_KEY
 
 ### Prometheus 与 Grafana 部署示例
 
-监控 Compose 已包含协调器，与单独部署择一。在源码根目录准备同样的 `deploy-local/config`、`saga.env` 和已有数据库：
+监控 Compose 已包含协调器，与单独部署择一。从当前部署目录复制配置到源码根目录，复用同一数据库与身份；只在首次选择监控模式时执行，已有服务先按计划维护停止：
 
 ```sh
-git clone --branch release https://github.com/nasa-runtime/saga-server.git
-cd saga-server
+git clone --branch release https://github.com/nasa-runtime/saga-server.git saga-source
+cp .env application.yml saga-source/
+cd saga-source
 export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
 export GRAFANA_ADMIN_PASSWORD='REPLACE_WITH_A_STRONG_PASSWORD'
 docker compose -p saga-monitoring -f docker/monitoring/compose.yml up -d

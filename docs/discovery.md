@@ -40,12 +40,9 @@ adapter 使用的 Nacos 3 HTTP API；`NACOS_SERVER_ADDR` 填完整服务地址�
 `SAGA_REGISTER_IP` / `SAGA_REGISTER_PORT`。`agent_addr` 必须固定到管理本进程服务记录的 agent。
 TTL 检查由当前本地资格驱动，不能把进程存活等同于业务可用。
 
-混合 Nacos 与 Consul 时，在已经准备好授权配置的挂载目录中增加
-[混合配置](../examples/config/discovery-mixed.yml)：
-
-```sh
-cp examples/config/discovery-mixed.yml deploy-local/config/
-```
+混合 Nacos 与 Consul 时，将[混合配置](../examples/config/discovery-mixed.yml)中的
+`discovery` 段合并到根目录 `application.yml`，保留已有 `secrets` 和 `saga`。若已有
+`discovery` 则替换该段，不能出现重复根键；无需新增环境文件或挂载目录。
 
 不要在容器环境文件中设置 `APP_PROFILE`，避免同时合并内置 profile 的目标。填入两个后端的
 完整地址、凭据和调用方可达端点，例如：

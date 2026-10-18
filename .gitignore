@@ -1,11 +1,17 @@
 /target/
 /tests/
 /deploy-local/
+/application.yml
+/compose.yml
+/logs/
+/order.json
 /.idea/
 /.vscode/
 .DS_Store
 .env
 .env.*
 *.pem
+*.der
 *.key
+*.env
 *.log

@@ -6,11 +6,20 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 70s
-    env_file: ../../deploy-local/saga.env
+    # 凭据按原文注入，避免 Compose 对密码内容进行变量替换。
+    env_file:
+      - path: ../../.env
+        format: raw
     ports:
       - "127.0.0.1:2070:2070"
     volumes:
-      - ../../deploy-local/config:/etc/saga-server:ro
+      # 与独立部署共用根目录的配置，仅挂载应用实际需要读取的文件。
+      - type: bind
+        source: ../../application.yml
+        target: /etc/saga-server/application.yml
+        read_only: true
+        bind:
+          create_host_path: false
     networks: [saga]
 
   prometheus:
