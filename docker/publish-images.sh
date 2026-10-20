@@ -18,9 +18,5 @@ done
 docker buildx imagetools create --tag "${IMAGE}:${VERSION}" \
   "${IMAGE}:sha-${GITHUB_SHA}-amd64" "${IMAGE}:sha-${GITHUB_SHA}-arm64"
 docker buildx imagetools inspect --raw "${IMAGE}:${VERSION}" > version-manifest.json
-python3 - <<'PY'
-import json
-with open('version-manifest.json') as source:
-    manifests = json.load(source)['manifests']
-assert sorted((item['platform']['os'], item['platform']['architecture']) for item in manifests) == [('linux', 'amd64'), ('linux', 'arm64')]
-PY
+jq -e '[.manifests[] | [.platform.os, .platform.architecture]] | sort ==
+  [["linux", "amd64"], ["linux", "arm64"]]' version-manifest.json > /dev/null

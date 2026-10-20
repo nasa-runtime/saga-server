@@ -412,39 +412,13 @@ docker compose logs --tail 100 saga-server
 
 镜像没有内置业务流程。流程拥有方声明并签名发布完整定义，各参与方登记步骤合同和能力、实现持久幂等与补偿。Java/Go 需要完整协议适配，普通 REST 接口不能直接登记为步骤。
 
-定义激活后，下载签名调用工具并准备业务输入：
+定义激活后，业务客户端按 [HTTP 签名协议](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md#http-地址与认证)发送请求，基础路径默认是 `/_nasa/saga`：
 
-```sh
-mkdir -p examples
-curl --fail --location \
-  https://raw.githubusercontent.com/nasa-runtime/saga-server/release/examples/saga-http.py \
-  --output examples/saga-http.py
-export SAGA_BASE_URL=http://127.0.0.1:2070/_nasa/saga
-export SAGA_HTTP_PRODUCER=order-worker
-read -r -s SAGA_HTTP_KEY
-export SAGA_HTTP_KEY
-python3 examples/saga-http.py definition \
-  --tenant system --workflow order_checkout --definition-version 1
-```
+1. 用 `order-worker` 和对应 `SAGA_WORKER_KEY` 调用 `GET /registry/definitions/system/order_checkout/1` 确认定义已激活。
+2. 用具有 `start` 权限的 `order-api` 和对应 `SAGA_CLIENT_KEY` 调用 `POST /instances`。按[请求字段](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md#发起与查询)提供稳定的业务身份与符合流程合同的输入。
+3. 用具有 `read` 权限的 caller 调用 `GET /instances/system/order-1001` 查询结果。
 
-使用具有 `start`、`read` 权限的身份创建并查询；密钥对应 `SAGA_CLIENT_KEY`：
-
-```sh
-export SAGA_HTTP_PRODUCER=order-api
-read -r -s SAGA_HTTP_KEY
-export SAGA_HTTP_KEY
-cat > order.json <<'JSON'
-{"order_id":"order-1001","quantity":1}
-JSON
-python3 examples/saga-http.py start \
-  --tenant system --workflow order_checkout --definition-version 1 \
-  --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
-  --input-file order.json
-python3 examples/saga-http.py get --tenant system --saga-id order-1001
-unset SAGA_HTTP_KEY
-```
-
-`Committed`/`Duplicate` 只说明创建结果，业务终态另行查询。结果不明时保持相同业务身份和内容，以新时间戳、nonce 和签名有界重试。代理必须保留原路径、正文及 `x-saga-*` 头。
+每次调用生成新的时间戳、nonce 和签名，不能混用不同 caller 的密钥。`Committed`/`Duplicate` 只说明创建结果，业务终态另行查询。结果不明时保持相同业务身份和内容，以新时间戳、nonce 和签名有界重试。代理必须保留原路径、正文及 `x-saga-*` 头。
 
 ## 多副本与持续运行
 

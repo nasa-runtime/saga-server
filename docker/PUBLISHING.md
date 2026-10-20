@@ -2,6 +2,8 @@
 
 维护分支为 `master`，发布分支固定为 `release`。Git 版本标签与 `Cargo.toml` 中的软件版本一致，例如 `1.0.0`，不加 `v` 前缀。Build 工作流在 release 分支生成 `linux/amd64` 和 `linux/arm64` 镜像归档，不自动上传镜像。归档保留 3 天，过期后需要重新构建。
 
+工作流通过 Bash 运行 `docker/release.sh`：Cargo 读取软件版本，`gh` 核对源码和构建来源，`tar`、`sha256sum` 与 Docker 核对镜像归档，`curl` 和 `jq` 处理仓库 API。镜像上传和 `latest` 更新分别由 `docker/publish-images.sh`、`docker/publish-latest.sh` 执行；这些发布入口要求 GitHub Actions 的 release 分支上下文。
+
 GitHub Actions 使用以下仓库配置：
 
 | 类型 | 名称 | 用途 |

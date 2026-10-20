@@ -152,33 +152,11 @@ GET 使用空 body 签名，path 不含 query。每次重试更新 timestamp、n
 
 首次持久提交返回 HTTP 200，响应含 `status: "Committed"`、`request_digest` 与 `saga` 快照；幂等命中返回 `status: "Duplicate"`。这只表示创建事实已提交，最终业务结果通过 `GET /instances/{tenant}/{saga_id}` 查询 `status`。
 
-下面使用 Python 标准库发送签名请求。先在环境中设置实际 `SAGA_BASE_URL`、`SAGA_CLIENT_KEY`；流程已激活且示例 payload 与业务步骤一致时执行：
-
-```python
-import hashlib, hmac, json, os, secrets, time, urllib.request
-from urllib.parse import urlsplit
-
-url = os.environ["SAGA_BASE_URL"].rstrip("/") + "/instances"
-producer = "order-api"
-timestamp = str(int(time.time() * 1000))
-nonce = secrets.token_hex(16)
-body = json.dumps({"tenant_id": "system", "saga_id": "order-1001",
-    "workflow": "order_checkout", "definition_version": 1,
-    "business_key": "order-1001", "trigger_id": "checkout-1001",
-    "input": {"order_id": "order-1001", "quantity": 1}}, separators=(",", ":")).encode()
-material = ("nasaga-http-v2\n" + producer + "\n" + urlsplit(url).path + "\n"
-    + timestamp + "\n" + nonce + "\n").encode() + body
-signature = hmac.new(bytes.fromhex(os.environ["SAGA_CLIENT_KEY"]), material, hashlib.sha256).hexdigest()
-request = urllib.request.Request(url, data=body, headers={
-    "Content-Type": "application/json", "x-saga-producer": producer,
-    "x-saga-timestamp": timestamp, "x-saga-nonce": nonce, "x-saga-signature": signature})
-with urllib.request.urlopen(request, timeout=10) as response:
-    print(response.status, response.read().decode())
-```
+业务客户端按上方签名协议发送原始 JSON 正文；签名后不得重新序列化或改变正文。查询使用空 body，路径示例为 `GET /instances/system/order-1001`。每次 HTTP 尝试生成新时间戳、nonce 和签名，拒绝改变签名目标的重定向。
 
 NASA 业务服务也可使用受管远程 Saga client，避免自行处理签名。需要将业务事实与发起意图一起提交时使用 reliable client 的本地事务 Outbox；直接 HTTP 调用与业务数据库提交之间没有跨服务原子保证。
 
-需要同时查询定义、发起与查询实例时，可使用 [Python 命令行示例](../examples/saga-http.py)，按[完整调用步骤](../README.md#发起和查询一个-saga)设置 `SAGA_BASE_URL`、`SAGA_HTTP_PRODUCER`、`SAGA_HTTP_KEY`。该示例只使用 Python 3 标准库，拒绝重定向，每次调用创建新 nonce，保持输入的业务身份不变。`definition` 使用 Registry caller 的凭据，`start` 与 `get` 使用具有相应权限的 caller；不能因请求指向同一服务而混用密钥。
+查询定义、发起和查询实例的顺序见[调用步骤](../README.md#发起和查询一个-saga)。读取定义使用 Registry caller 的凭据，发起与查询使用具有相应权限的 caller；不能因请求指向同一服务而混用密钥。
 
 ## 接口与失败语义
 

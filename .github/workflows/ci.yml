@@ -22,7 +22,7 @@ jobs:
       - name: Format
         run: cargo +${{ matrix.toolchain }} fmt --all --check
       - name: Repository overview contract
-        run: python3 docker/check-overview.py
+        run: bash docker/release.sh check-overview
       - name: Lint
         run: cargo +${{ matrix.toolchain }} clippy --all-targets --locked -- -D warnings
       - name: Build
@@ -52,7 +52,7 @@ jobs:
       - name: Read package version
         id: package
         run: |
-          python3 docker/package-version.py
+          bash docker/release.sh package-version
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - name: Build image archive
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc

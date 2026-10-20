@@ -165,35 +165,15 @@ Docker 内置健康检查访问 `2070/readyz`。`/healthz` 表示进程存活，
 
 先接入一个流程拥有方和步骤参与方，按[业务接入指南](docs/integration.md#参与方与流程拥有方)完成本地持久存储、签名定义发布和能力续租。协调镜像没有内置 `order_checkout` 或业务步骤；下面假设业务方已发布该流程的定义版本 `1`，首步骤接受 `order_id` 与 `quantity`。业务方新增流程通过相同协议上报，服务端保持运行。
 
-[HTTP 示例程序](examples/saga-http.py)只依赖 Python 3 标准库，支持查询定义、创建实例和查询状态。`SAGA_HTTP_KEY` 填对应 caller 的密钥，不能混用 worker 和 API caller 的密钥；交互输入时不回显。
+业务方按[HTTP 签名协议](docs/integration.md#http-地址与认证)构造请求，基础路径默认是 `/_nasa/saga`：
 
-```sh
-export SAGA_BASE_URL=http://127.0.0.1:2070/_nasa/saga
-export SAGA_HTTP_PRODUCER=order-worker
-read -r -s SAGA_HTTP_KEY
-export SAGA_HTTP_KEY
-python3 examples/saga-http.py definition \
-  --tenant system --workflow order_checkout --definition-version 1
-```
+1. 使用 `order-worker` 及其 `SAGA_WORKER_KEY`，调用 `GET /registry/definitions/system/order_checkout/1` 确认定义已激活。
+2. 切换为具有 `start` 权限的 `order-api` 及其 `SAGA_CLIENT_KEY`，按[创建请求字段](docs/integration.md#发起与查询)调用 `POST /instances`，提交稳定的实例 ID、业务键、触发 ID 和符合流程合同的输入。
+3. 使用具有 `read` 权限的 caller，调用 `GET /instances/system/order-1001` 查询最终状态。
 
-以上输入 `SAGA_WORKER_KEY` 的值，确认定义已激活后再发起。切换为 `order-api`，再次输入 `SAGA_CLIENT_KEY` 的值，并准备与流程合同一致的输入：
+密钥必须属于当前 caller，不能混用 worker 和 API caller 的密钥。每次请求使用新的时间戳、nonce 和签名；签名覆盖实际 path 与原始正文，不能跟随改变目标的 HTTP 重定向。
 
-```sh
-export SAGA_HTTP_PRODUCER=order-api
-read -r -s SAGA_HTTP_KEY
-export SAGA_HTTP_KEY
-cat > order.json <<'JSON'
-{"order_id":"order-1001","quantity":1}
-JSON
-python3 examples/saga-http.py start \
-  --tenant system --workflow order_checkout --definition-version 1 \
-  --saga-id order-1001 --business-key order-1001 --trigger-id checkout-1001 \
-  --input-file order.json
-python3 examples/saga-http.py get --tenant system --saga-id order-1001
-unset SAGA_HTTP_KEY
-```
-
-创建返回 HTTP 200 的 `Committed` 或 `Duplicate` 只表示创建事实已持久化，最终状态由查询确认。结果不明时保留原实例 ID、业务键、触发 ID 和输入，再次执行同一命令会生成新的 nonce 和签名；不要换成新事务 ID。示例不自动重试、不跟随 HTTP 重定向，失败保留原 HTTP 状态，详细权限和失败处理见[接口合同](docs/integration.md#接口与失败语义)。
+创建返回 HTTP 200 的 `Committed` 或 `Duplicate` 只表示创建事实已持久化，最终状态由查询确认。结果不明时保留原实例 ID、业务键、触发 ID 和输入，重新签名后重试；不要换成新事务 ID。详细权限和失败处理见[接口合同](docs/integration.md#接口与失败语义)。
 
 ## 使用 Nacos
 

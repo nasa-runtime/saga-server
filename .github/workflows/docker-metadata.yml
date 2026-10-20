@@ -44,14 +44,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Verify documentation and existing image source
-        run: python3 docker/verify-metadata.py
+        run: bash docker/release.sh verify-metadata
       - name: Verify existing version contents
-        run: python3 docker/registry-check.py
+        run: bash docker/release.sh registry-check
       - name: Publish repository overview
         env:
           HUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: python3 docker/publish-overview.py
+        run: bash docker/release.sh publish-overview
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
@@ -62,4 +62,4 @@ jobs:
       - name: Verify latest contents
         env:
           VERIFY_LATEST: 'true'
-        run: python3 docker/registry-check.py
+        run: bash docker/release.sh registry-check
