@@ -108,28 +108,24 @@ Use `docker compose stop` only for planned maintenance or upgrades. Restart with
 
 ## Run with Docker
 
-Set `SAGA_IMAGE` to an explicit image tag or digest. These commands use `nasaruntime/saga-server:1.0.0`:
+Use the `.env` and `application.yml` prepared above with the actual database, stable replica identity and keys. The image runs as UID/GID `10001:10001`. On Linux, create a dedicated writable log directory:
 
 ```sh
-export SAGA_IMAGE=nasaruntime/saga-server:1.0.0
-docker pull "$SAGA_IMAGE"
-docker run -d --name saga-server \
-  --restart unless-stopped \
-  --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --stop-timeout 70 \
-  --env-file ./.env \
-  --mount type=bind,src="$(pwd)/application.yml",dst=/etc/saga-server/application.yml,readonly \
-  --publish 127.0.0.1:2070:2070 \
-  "$SAGA_IMAGE"
-curl --fail http://127.0.0.1:2070/healthz
-curl --fail http://127.0.0.1:2070/readyz
+sudo install -d -o 10001 -g 10001 -m 0750 logs
 ```
 
-The Alpine image runs as UID/GID `10001:10001`. The environment file above explicitly sets `SAGA_LOG_PATH` to an empty value for console logging and a read only root filesystem. When the variable is unset, file logging defaults to `/usr/local/logs/${application.name}` and requires a directory writable by that UID. `SAGA_LOG_LEVEL` defaults to `info`. The application YAML must be readable by UID 10001. Mount only that file; mounting the deployment directory would also import the Compose YAML. The environment file and private key are not mounted.
+```sh
+docker run -d --name saga-server --restart unless-stopped --stop-timeout 70 \
+  -p 127.0.0.1:2070:2070 \
+  --env-file ./.env -e SAGA_LOG_PATH=/usr/local/logs/saga-server \
+  -v "$PWD/application.yml:/etc/saga-server/application.yml:ro" \
+  -v "$PWD/logs:/usr/local/logs/saga-server" \
+  nasaruntime/saga-server:1.0.0
+```
 
-Registry connections are disabled by default. Call the HTTP API at `http://saga-server:2070/_nasa/saga` on a shared Docker network, or at the host's reachable mapped address. The example's loopback publication is host local; bind a specific private host IP for remote clients. Container `localhost` is the container itself: database and participant endpoints must be reachable from the container.
+Check `http://127.0.0.1:2070/readyz` for business readiness and use `docker logs -f saga-server` for logs. The command enables file logging, overriding the empty log path in `.env`; Docker Desktop must allow sharing the log directory. Persistent coordination data lives in the external MySQL/PostgreSQL database. Keep that database, configuration, keys and replica identity when recreating the container.
 
-`SAGA_YML` changes the import path. `APP__SERVER__PORT` changes the listener; update Docker's health check, port mapping and Prometheus targets together. The embedded health check uses `2070/readyz`. `/healthz` is liveness; `/readyz` is business readiness. Startup and shutdown budgets are 60 seconds, so use a longer container stop timeout.
+Direct HTTP addressing is the default and requires no registry. The loopback mapping is host-local. See the [Docker Hub guide](docker/README.md) for complete registry, networking, read-only root, log rotation and maintenance commands.
 
 ## Start and query a Saga
 

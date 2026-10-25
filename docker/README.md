@@ -1,6 +1,6 @@
 # saga-server
 
-独立 Saga 协调服务，支持动态流程、数据库持久恢复和多注册中心。已接入的业务服务新增流程时，客户端主动上报签名定义、步骤能力及事务 ID，协调器无需修改 YAML、热加载或重启。
+独立 Saga 协调服务，支持动态流程、持久恢复和多注册中心。新增已授权流程由客户端主动上报，协调器无需改 YAML 或重启。
 
 - 镜像：`nasaruntime/saga-server:1.0.0`，支持 `linux/amd64`、`linux/arm64`。
 - Alpine/musl，UID/GID `10001:10001`；持久存储使用已有 MySQL 或 PostgreSQL。
@@ -8,7 +8,7 @@
 
 ## 运行架构与边界
 
-协调状态、Inbox、Outbox、timer、Catalog 与审计共用数据库。创建事务与首步命令原子提交；至少一次投递要求参与方实现持久幂等和补偿。租约、CAS 与 fencing 限制失权推进。
+协调状态、Inbox、Outbox、timer、Catalog 与审计共用数据库。创建与首步命令原子提交；参与方实现持久幂等及补偿，租约与 fencing 限制失权推进。
 
 Nacos/Consul 负责定位，不复制 Saga 数据或提供租户授权；具名 `qualifier` 不跨环境回退。协调器与参与方必须双向可达。本镜像只装配 HTTP 协调角色，不执行业务步骤，不提供跨服务 ACID 或物理 exactly-once；未装配 gRPC、Kafka、Redis Streams。
 
@@ -16,11 +16,11 @@ Nacos/Consul 负责定位，不复制 Saga 数据或提供租户授权；具名 
 
 流程拥有方发布含 `workflow`、`definition_version` 和步骤合同的签名定义，参与方登记能力并续租；满足 `validated` 策略后，发起方携带 `saga_id` 创建实例。既有实例使用冻结的定义版本与摘要。YAML 只管理基础设施、运行策略与信任范围。
 
-新流程沿用已授权身份、公钥和网络；新增信任范围需调整部署配置。定义未激活不能创建实例，Ready 不代表流程已激活。[业务接入协议](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。
+新增信任范围仍需维护配置；定义激活后才能创建实例，Ready 不代表流程已激活。[业务接入协议](https://github.com/nasa-runtime/saga-server/blob/release/docs/integration.md)。
 
 ## 配置与启动
 
-使用 Docker Compose 2.30.0 或更新版本，一个部署目录放三个文件即可，无需安装 Rust、克隆源码或额外建立配置子目录：
+使用 Docker Compose 2.30.0 或更新版本，在同一部署目录准备三个文件：
 
 ```text
 saga-server/
@@ -105,6 +105,26 @@ docker run --detach --name saga-server \
   "$SAGA_IMAGE"
 curl --fail http://127.0.0.1:2070/readyz
 ```
+
+### 配置与文件日志挂载
+
+主 README 的简短命令保留只读 YAML 和可写日志目录。下面的完整形式同时限制根文件系统与 Docker 控制台日志。在 Linux 上创建本部署专用日志目录，Docker Desktop 需允许目录共享：
+
+```sh
+sudo install -d -o 10001 -g 10001 -m 0750 logs
+docker run -d --name saga-server \
+  --restart unless-stopped --stop-timeout 70 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --env-file ./.env --env SAGA_LOG_PATH=/usr/local/logs/saga-server \
+  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
+  --mount "type=bind,src=$PWD/logs,dst=/usr/local/logs/saga-server" \
+  --publish 127.0.0.1:2070:2070 \
+  nasaruntime/saga-server:1.0.0
+curl --fail http://127.0.0.1:2070/readyz
+```
+
+此命令覆盖 `.env` 的空日志路径，与控制台模式择一；复用原数据库、密钥和副本身份。
 
 ## Nacos、Consul 与多注册中心
 
@@ -349,21 +369,7 @@ curl --fail http://127.0.0.1:12080/_nasa/saga/metrics
 curl --fail http://127.0.0.1:9464/metrics
 ```
 
-文件日志与控制台模式择一；以下授权命令用于 Linux 宿主机，Docker Desktop 还需符合文件共享授权：
-
-```sh
-sudo install -d -o 10001 -g 10001 -m 0750 logs
-docker run --detach --name saga-file-log \
-  --restart unless-stopped --stop-timeout 70 \
-  --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --env-file ./.env --env SAGA_LOG_PATH=/var/log/saga-server \
-  --mount "type=bind,src=$PWD/application.yml,dst=/etc/saga-server/application.yml,readonly" \
-  --mount "type=bind,src=$PWD/logs,dst=/var/log/saga-server" \
-  --publish 127.0.0.1:2070:2070 \
-  "$SAGA_IMAGE"
-curl --fail http://127.0.0.1:2070/readyz
-docker logs --tail 100 saga-file-log
-```
+文件日志的目录权限、只读配置与可写挂载见上方[配置与文件日志挂载](#配置与文件日志挂载)。
 
 私钥及环境文件仅部署账号可读，配置 YAML 允许 UID 10001 读取。不要输出包含环境变量的完整 `docker inspect`。
 
